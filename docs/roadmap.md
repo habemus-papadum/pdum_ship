@@ -30,10 +30,11 @@ commands.
 1. `pdum_aws` — pilot for a single uv package. **Done 2026-10-29** (commit
    `ed8a755`; baseline tag `habemus-papadum-aws-v0.6.0`; first ship release
    pending).
-2. `cf_browser_credentials` — pilot for a pnpm workspace: peer audit, baseline
-   tags on the `v0.8.0` commit, decouple, replace `scripts/versioning.mjs`.
-   Finish or merge the `codex/credential-sources` branch first; decoupling
-   edits every manifest and will conflict with it.
+2. `cf_browser_credentials` — pilot for a pnpm workspace. **Done 2026-10-29**
+   (commit `14881d6`): peer audit, baseline tags on the `v0.8.0` commit,
+   decoupled, `scripts/versioning.mjs` gone. The migration was run from the
+   `ship-adopt` skill alone; its feedback shaped the pnpm procedure in
+   [conventions.md](conventions.md).
 3. `pdum_gcp`, `pdum_plumbum`, `pdum_coiled` — same migration as `pdum_aws`.
 4. `pdum_agent_tools` — replace the inline `uv version` loop in `release.yml`
    (it bumps four of six members); decouple.
@@ -52,8 +53,8 @@ commands.
 | --- | --- | --- | --- |
 | `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 through the workflow the same day | |
 | `pdum_aws` | local `release.sh` + `hatch publish`, `-alpha` marker | **done**: 0.6.1 released 2026-10-29 through the workflow, tag `habemus-papadum-aws-v0.6.1`, manifest `0.6.1+dev` | CI test fixed (console width) on the way |
-| `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | next | `codex/credential-sources` is fully merged into `main`; its worktree can go |
-| `pdum_aiui` | `versioning.mjs`, coupled, `v0.24.0` | not started | `codex/credential-sources` is fully merged into `main`; its worktree can go; stale worktree `pdum_aiui-1d` |
+| `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | **done**: migrated 2026-10-29 (commit `14881d6`), nine packages decoupled with baseline tags `<package>-v0.8.0`, every sibling dependency a peer with a floor; dry run green | first per-package release pending |
+| `pdum_aiui` | `versioning.mjs`, coupled, `v0.24.0` | next | the merged `codex/credential-sources` and July `pdum_aiui-1d` worktrees were removed 2026-10-29 |
 | `pdum_rfb` | `_versioning.py`, coupled, `v0.3.0` | not started | |
 | `pdum_dsl` | `_versioning.py`, coupled, no tags | not started | |
 | `pdum_agent_tools` | inline `uv version`, coupled, `v0.1.0` | not started | |
