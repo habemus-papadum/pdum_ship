@@ -175,3 +175,35 @@ def test_coupled_repository_releases_everything_at_one_version(workspace_repo):
     assert plan.coupled and {str(i.version) for i in plan.items} == {"1.0.0"}
     release.execute(repo, cfg, plan, publish=False, push=True, run_tests=False, say=say)
     assert sorted(workspace_repo.origin_tags()) == ["demo-a-v1.0.0", "demo-b-v1.0.0"]
+
+
+def test_pnpm_package_release_builds_tags_and_restores(pnpm_repo):
+    from pdum.ship import deps
+
+    repo, cfg, pkgs = load(pnpm_repo)
+    assert sorted(p.name for p in pkgs) == ["@demo/core", "@demo/plugin"]
+    plugin = packages_mod.find(pkgs, "@demo/plugin")
+    assert plugin.tag_component == "plugin"
+    assert deps.check(repo, cfg, pkgs, hook=False) == []
+
+    plan = do_release(pnpm_repo, "@demo/plugin", "minor")
+    assert plan.items[0].tag == "plugin-v0.1.0"
+    assert pnpm_repo.origin_tags() == ["plugin-v0.1.0"]
+
+    # The build ran for the package and its workspace dependency before publishing.
+    assert (cfg.root / "packages" / "plugin" / "dist" / "index.js").exists()
+    assert (cfg.root / "packages" / "core" / "dist" / "index.js").exists()
+
+    repo, cfg, pkgs = load(pnpm_repo)
+    assert packages_mod.read_version(cfg.root, plugin) == "0.1.0+dev"
+    core = packages_mod.find(pkgs, "@demo/core")
+    assert packages_mod.read_version(cfg.root, core) == "0.0.0+dev"
+    assert repo.is_clean()
+    # The lockfile is still consistent with the manifests and the peer range is untouched.
+    assert deps.lock_problems(cfg) == []
+    import json
+
+    manifest = json.loads((cfg.root / plugin.manifest).read_text())
+    assert manifest["peerDependencies"] == {"@demo/core": "workspace:>=0.0.0"}
+    tagged = repo.tag_commit("plugin-v0.1.0")
+    assert '"version": "0.1.0"' in repo.git("show", f"{tagged}:packages/plugin/package.json")

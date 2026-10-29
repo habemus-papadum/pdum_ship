@@ -95,13 +95,16 @@ In order:
    exist yet (`--no-registry-check` skips the question).
 3. Write the version. Python goes through `uv version --package`, so
    `uv.lock` follows. npm edits `package.json` in place.
-4. Build (`uv build --package`) and refuse any built file that still carries a
-   development version.
+4. Build. Python: `uv build --package`, refusing any built file that still
+   carries a development version. npm: the package's `build` script and those
+   of its workspace dependencies (`pnpm --filter "<name>..." run build`), so
+   `pnpm publish` packs fresh output.
 5. Run the test commands.
 6. Publish: `uv publish` with the credentials in the environment
    (`UV_PUBLISH_TOKEN`, or `UV_PUBLISH_USERNAME`/`UV_PUBLISH_PASSWORD`), or
-   `pnpm publish --filter <name> --no-git-checks --access public` with the
-   token your `.npmrc` reads from the environment.
+   `pnpm -r publish --filter <name> --no-git-checks --access public` with the
+   token your `.npmrc` reads from the environment (the reusable workflow lets
+   `actions/setup-node` write that `.npmrc` from `NODE_AUTH_TOKEN`).
 7. Commit the version and lockfile, tag `<package>-v<version>`, push the
    commit and the tag atomically.
 8. Create a GitHub release for the tag when `gh` is available.

@@ -117,3 +117,59 @@ def workspace_repo(tmp_path: Path) -> DemoRepo:
     demo.commit_all("initial")
     demo.git("push", "-q", "-u", "origin", "main")
     return demo
+
+
+_BUILD_SCRIPT = (
+    "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});"
+    "fs.writeFileSync('dist/index.js','export {}')\""
+)
+
+
+def _package_json(name: str, **extra) -> str:
+    import json
+
+    data = {
+        "name": name,
+        "version": "0.0.0+dev",
+        "type": "module",
+        "main": "dist/index.js",
+        "files": ["dist"],
+        "scripts": {"build": _BUILD_SCRIPT, "test": 'node -e "process.exit(0)"'},
+        **extra,
+    }
+    return json.dumps(data, indent=2) + "\n"
+
+
+@pytest.fixture
+def pnpm_repo(tmp_path: Path) -> DemoRepo:
+    """A pnpm workspace: ``@demo/core`` and ``@demo/plugin`` (peer on core), no uv project.
+
+    The root ``pyproject.toml`` exists only to hold ``[tool.ship]``; it is not a package.
+    """
+    root = tmp_path / "pn"
+    root.mkdir()
+    origin = tmp_path / "pn-origin.git"
+    demo = _init_repo(root, origin)
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "pn-tooling"\nversion = "0"\nrequires-python = ">=3.12"\n\n'
+        "[tool.uv]\npackage = false\n" + SHIP_TABLE
+    )
+    (root / "package.json").write_text(
+        '{\n  "name": "pn-root",\n  "private": true,\n  "version": "0.0.0",\n'
+        '  "scripts": { "test": "pnpm -r test" }\n}\n'
+    )
+    (root / "pnpm-workspace.yaml").write_text('packages:\n  - "packages/*"\n')
+    demo.write("packages/core/package.json", _package_json("@demo/core"))
+    demo.write(
+        "packages/plugin/package.json",
+        _package_json(
+            "@demo/plugin",
+            peerDependencies={"@demo/core": "workspace:>=0.0.0"},
+            devDependencies={"@demo/core": "workspace:*"},
+        ),
+    )
+    run(["pnpm", "install", "--offline"], root)
+    (root / ".gitignore").write_text("node_modules/\ndist/\n")
+    demo.commit_all("initial")
+    demo.git("push", "-q", "-u", "origin", "main")
+    return demo

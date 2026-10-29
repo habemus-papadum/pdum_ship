@@ -246,9 +246,23 @@ def _version_files(config: Config, package: Package) -> list[Path]:
     return files
 
 
+def _npm_has_script(root: Path, package: Package, script: str) -> bool:
+    import json
+
+    data = json.loads((root / package.manifest).read_text())
+    return script in (data.get("scripts") or {})
+
+
 def _build(config: Config, item: PackagePlan, say: Say) -> list[Path]:
     package = item.package
-    if package.ecosystem != "python":
+    if package.ecosystem == "npm":
+        # Build the package and the workspace packages it depends on; pnpm publish packs
+        # whatever `files` names, so the build must come first.
+        if _npm_has_script(config.root, package, "build"):
+            if str(package.dir) == ".":
+                _run(["pnpm", "run", "build"], config.root, say)
+            else:
+                _run(["pnpm", "--filter", f"{package.name}...", "run", "build"], config.root, say)
         return []
     out_dir = config.root / "dist" / package.tag_component
     if out_dir.exists():
@@ -274,9 +288,11 @@ def _publish(config: Config, item: PackagePlan, files: list[Path], say: Say) -> 
     if package.ecosystem == "python":
         _run(["uv", "publish", *(str(f) for f in files)], config.root, say)
         return
-    args = ["pnpm", "publish", "--no-git-checks", "--access", "public"]
-    if str(package.dir) != ".":
-        args[2:2] = ["--filter", package.name]
+    # `--filter` needs the recursive form; a bare `pnpm publish` publishes the root package.
+    if str(package.dir) == ".":
+        args = ["pnpm", "publish", "--no-git-checks", "--access", "public"]
+    else:
+        args = ["pnpm", "-r", "publish", "--filter", package.name, "--no-git-checks", "--access", "public"]
     _run(args, config.root, say)
 
 

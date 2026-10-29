@@ -128,6 +128,8 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           cache: pnpm
+          # Writes an .npmrc that reads the publish token from NODE_AUTH_TOKEN.
+          registry-url: https://registry.npmjs.org
 
       - name: Require a successful CI run for this commit
         if: ${{ !inputs.skip_ci_check }}
