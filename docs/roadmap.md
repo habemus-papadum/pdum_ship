@@ -51,7 +51,7 @@ commands.
 
 | Repository | Before | Now | Notes |
 | --- | --- | --- | --- |
-| `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 through the workflow the same day | |
+| `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 to 0.5.0 through the workflow the same day | 0.5.0 refuses a refresh that downgrades or removes third-party packages |
 | `pdum_aws` | local `release.sh` + `hatch publish`, `-alpha` marker | **done**: 0.6.1 released 2026-10-29 through the workflow, tag `habemus-papadum-aws-v0.6.1`, manifest `0.6.1+dev` | CI test fixed (console width) on the way |
 | `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | **done**: migrated 2026-10-29 (commit `14881d6`), nine packages decoupled with baseline tags `<package>-v0.8.0`, every sibling dependency a peer with a floor; dry run green | first per-package release pending |
 | `pdum_aiui` | `versioning.mjs`, coupled, `v0.24.0` | next | the merged `codex/credential-sources` and July `pdum_aiui-1d` worktrees were removed 2026-10-29 |
@@ -83,5 +83,19 @@ adding a package, and the policy paragraph for agent instructions. The
   locally.
 - Trusted publishing (OIDC) to PyPI and npm: later; the workflow's publish
   step is the only place that changes.
-- `ship deps refresh` has run only in tests; the first scheduled integration
-  run in a consumer repository is still to be set up.
+- `ship deps refresh` ran for real on 2026-10-29 in `pdum_aws`. One run asked
+  uv to upgrade only `habemus-papadum-ship` and came back with jupyterlab
+  downgraded 4.6.2 → 3.6.8 and sixteen other packages churned; it did not
+  reproduce and is unexplained. Since 0.5.0 a refresh that downgrades or
+  removes a third-party package fails and restores the lockfiles. The first
+  scheduled integration run in a consumer repository is still to be set up.
+- A release is visible to `uv lock --upgrade-package` only once PyPI's JSON
+  simple index has it, a few minutes after the HTML page; a refresh run right
+  after a release can miss it. Harmless for a scheduled run.
+- `cf-creds-aws` 0.8.1 was published without npm provenance attestations
+  (the old workflow passed `--provenance`; the reusable workflow lacks
+  `id-token: write`). Decide whether to add it.
+- The `ship-check` hook is proven, but pins a `rev` that each ship release
+  outdates. A `repo: local` hook running `uv run ship deps check --hook`
+  would follow the repository's lockfile instead. Decide which form the
+  conventions recommend.
