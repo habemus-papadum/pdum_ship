@@ -50,10 +50,10 @@ commands.
 
 | Repository | Before | Now | Notes |
 | --- | --- | --- | --- |
-| `pdum_ship` | — | ship 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); later releases through the workflow | |
-| `pdum_aws` | local `release.sh` + `hatch publish`, `-alpha` marker | migrated; `0.6.0+dev`; CI test fixed (console width) | first workflow release pending |
-| `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | not started | active branch `codex/credential-sources` |
-| `pdum_aiui` | `versioning.mjs`, coupled, `v0.24.0` | not started | active branch `codex/credential-sources`; stale worktree `pdum_aiui-1d` |
+| `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 through the workflow the same day | |
+| `pdum_aws` | local `release.sh` + `hatch publish`, `-alpha` marker | **done**: 0.6.1 released 2026-10-29 through the workflow, tag `habemus-papadum-aws-v0.6.1`, manifest `0.6.1+dev` | CI test fixed (console width) on the way |
+| `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | next | `codex/credential-sources` is fully merged into `main`; its worktree can go |
+| `pdum_aiui` | `versioning.mjs`, coupled, `v0.24.0` | not started | `codex/credential-sources` is fully merged into `main`; its worktree can go; stale worktree `pdum_aiui-1d` |
 | `pdum_rfb` | `_versioning.py`, coupled, `v0.3.0` | not started | |
 | `pdum_dsl` | `_versioning.py`, coupled, no tags | not started | |
 | `pdum_agent_tools` | inline `uv version`, coupled, `v0.1.0` | not started | |
@@ -92,8 +92,6 @@ shared-version logic from `release.yml`.
 
 - `ship-check` at tag `habemus-papadum-ship-v0.1.0` has an invalid manifest
   (fixed in `main`; released as 0.1.1). Repositories reference 0.1.1 or later.
-- `pdum_aws` first release: the only commit since `v0.6.0` is the old alpha
-  bump, so the honest version is `0.6.1`.
 - `pdum-aiui-intent-tool-v0`: decide between adopting and archiving.
 - `pdum_aiui-1d`: a July detached worktree at `0.13.0+dev`; remove unless it
   holds unmerged work.
