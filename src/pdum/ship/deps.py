@@ -49,8 +49,8 @@ def uv_lock_registry_packages(root: Path) -> set[str]:
 _PNPM_KEY_RE = re.compile(r"^(?P<name>@?[^@]+)@(?P<version>[^(]+)")
 
 
-def pnpm_lock_versions(root: Path) -> dict[str, str]:
-    lock = root / "pnpm-lock.yaml"
+def pnpm_lock_versions(pnpm_dir: Path) -> dict[str, str]:
+    lock = pnpm_dir / "pnpm-lock.yaml"
     if not lock.exists():
         return {}
     data = yaml.safe_load(lock.read_text()) or {}
@@ -62,8 +62,8 @@ def pnpm_lock_versions(root: Path) -> dict[str, str]:
     return versions
 
 
-def lock_versions(root: Path) -> dict[str, str]:
-    return {**uv_lock_versions(root), **pnpm_lock_versions(root)}
+def lock_versions(config: Config) -> dict[str, str]:
+    return {**uv_lock_versions(config.root), **pnpm_lock_versions(config.pnpm_dir)}
 
 
 # -- refresh ---------------------------------------------------------------------
@@ -100,8 +100,12 @@ class RefreshError(RuntimeError):
     """A refresh did not complete; the lockfiles are back as they were."""
 
 
-def _lockfiles(root: Path) -> list[Path]:
-    return [p for p in (root / "uv.lock", root / "pnpm-lock.yaml") if p.exists()]
+def _pnpm_lock(config: Config) -> Path:
+    return config.root / config.pnpm_root / "pnpm-lock.yaml"
+
+
+def _lockfiles(config: Config) -> list[Path]:
+    return [p for p in (config.root / "uv.lock", _pnpm_lock(config)) if p.exists()]
 
 
 def _moved(before: dict[str, str], after: dict[str, str]) -> list[Moved]:
@@ -136,19 +140,20 @@ def refresh(
     lockfiles to their committed state.
     """
     root = config.root
-    before = lock_versions(root)
+    before = lock_versions(config)
     workspace_names = {p.name for p in packages}
-    lockfiles = [p.relative_to(root) for p in _lockfiles(root)]
+    lockfiles = [p.relative_to(root) for p in _lockfiles(config)]
 
     def restore(message: str) -> RefreshError:
         if lockfiles:
             repo.checkout_paths(lockfiles)
         return RefreshError(message + "\nThe lockfiles are back as they were.")
 
-    commands: list[list[str]] = []
+    # Each command runs in the directory of the lockfile it moves.
+    commands: list[tuple[list[str], Path]] = []
     if (root / "uv.lock").exists():
         if everything:
-            commands.append(["uv", "lock", "--upgrade"])
+            commands.append((["uv", "lock", "--upgrade"], root))
         else:
             ours = sorted(n for n in uv_lock_registry_packages(root) if config.is_ours(n) and n not in workspace_names)
             if ours:
@@ -157,29 +162,29 @@ def refresh(
                 args = ["uv", "lock", "--refresh"]
                 for name in ours:
                     args += ["--upgrade-package", name]
-                commands.append(args)
-    if (root / "pnpm-lock.yaml").exists():
+                commands.append((args, root))
+    if _pnpm_lock(config).exists():
         if everything:
-            commands.append(["pnpm", "update", "-r"])
+            commands.append((["pnpm", "update", "-r"], config.pnpm_dir))
         else:
             patterns = [p for p in config.ours if p.startswith("@") or "/" in p]
             if patterns:
-                commands.append(["pnpm", "update", "-r", *patterns])
+                commands.append((["pnpm", "update", "-r", *patterns], config.pnpm_dir))
 
     if not commands:
         say("nothing to refresh: no lockfile holds one of our packages")
         return []
-    for args in commands:
+    for args, cwd in commands:
         say(f"  $ {' '.join(args)}" + ("  (dry run)" if dry_run else ""))
         if dry_run:
             continue
-        proc = subprocess.run(args, cwd=root)
+        proc = subprocess.run(args, cwd=cwd)
         if proc.returncode != 0:
             raise restore(f"command failed: {' '.join(args)}")
     if dry_run:
         return []
 
-    moved = _moved(before, lock_versions(root))
+    moved = _moved(before, lock_versions(config))
     if not moved:
         return []
 
@@ -196,12 +201,14 @@ def refresh(
                 "an upper bound), or investigate the resolution."
             )
 
-    for args in (["uv", "sync", "--locked"], ["pnpm", "install", "--frozen-lockfile"]):
-        lock = root / ("uv.lock" if args[0] == "uv" else "pnpm-lock.yaml")
+    for args, cwd, lock in (
+        (["uv", "sync", "--locked"], root, root / "uv.lock"),
+        (["pnpm", "install", "--frozen-lockfile"], config.pnpm_dir, _pnpm_lock(config)),
+    ):
         if not lock.exists():
             continue
         say(f"  $ {' '.join(args)}")
-        proc = subprocess.run(args, cwd=root)
+        proc = subprocess.run(args, cwd=cwd)
         if proc.returncode != 0:
             raise restore(f"install failed after the lockfile moved:\n{_table(moved)}\n  $ {' '.join(args)}")
 
@@ -231,7 +238,7 @@ def _python_manifests(config: Config, packages: list[Package]) -> list[Path]:
 
 
 def _npm_manifests(config: Config, packages: list[Package]) -> list[Path]:
-    paths = {config.root / "package.json"}
+    paths = {config.root / config.pnpm_root / "package.json"}
     paths.update(config.root / p.manifest for p in packages if p.ecosystem == "npm")
     return sorted(p for p in paths if p.exists())
 
@@ -264,10 +271,10 @@ def lock_problems(config: Config) -> list[str]:
         proc = subprocess.run(["uv", "lock", "--check"], cwd=root, capture_output=True, text=True)
         if proc.returncode != 0:
             problems.append("uv.lock is not current with pyproject.toml; run `uv lock`")
-    if (root / "pnpm-lock.yaml").exists():
+    if _pnpm_lock(config).exists():
         proc = subprocess.run(
             ["pnpm", "install", "--frozen-lockfile", "--lockfile-only"],
-            cwd=root,
+            cwd=config.pnpm_dir,
             capture_output=True,
             text=True,
         )

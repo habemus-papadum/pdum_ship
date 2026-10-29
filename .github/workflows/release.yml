@@ -124,14 +124,17 @@ jobs:
       - name: Detect a pnpm workspace
         id: pnpm
         run: |
-          if [ -f pnpm-workspace.yaml ] || [ -f package.json ]; then
+          # The workspace is the repository root unless [tool.ship] pnpm-root names a subdirectory.
+          root=$(python3 -c 'import tomllib; t = tomllib.load(open("pyproject.toml", "rb")); print(t.get("tool", {}).get("ship", {}).get("pnpm-root", "."))')
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+          if [ -f "$root/pnpm-workspace.yaml" ] || [ -f "$root/package.json" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
           # pnpm/action-setup needs a version: from package.json's packageManager when the
           # repository pins one, otherwise from the pnpm_version input.
-          if [ -f package.json ] && grep -q '"packageManager"' package.json; then
+          if [ -f "$root/package.json" ] && grep -q '"packageManager"' "$root/package.json"; then
             echo "pinned=true" >> "$GITHUB_OUTPUT"
           else
             echo "pinned=false" >> "$GITHUB_OUTPUT"
@@ -139,6 +142,8 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         if: steps.pnpm.outputs.present == 'true' && steps.pnpm.outputs.pinned == 'true'
+        with:
+          package_json_file: ${{ steps.pnpm.outputs.root }}/package.json
       - uses: pnpm/action-setup@v4
         if: steps.pnpm.outputs.present == 'true' && steps.pnpm.outputs.pinned == 'false'
         with:
@@ -150,12 +155,14 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+          cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
       - uses: actions/setup-node@v5
         if: steps.pnpm.outputs.present == 'true' && hashFiles('.nvmrc') == ''
         with:
           node-version: ${{ inputs.node_version }}
           cache: pnpm
+          cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
 
       - name: Require a successful CI run for this commit
@@ -180,20 +187,23 @@ jobs:
           exit 1
 
       - name: Install the repository
+        env:
+          PNPM_ROOT: ${{ steps.pnpm.outputs.root }}
         run: |
           uv sync --locked
-          if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; fi
+          if [ -f "$PNPM_ROOT/pnpm-lock.yaml" ]; then pnpm -C "$PNPM_ROOT" install --frozen-lockfile; fi
 
       - name: Check publishing credentials
         if: ${{ !inputs.dry_run }}
         env:
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PNPM_ROOT: ${{ steps.pnpm.outputs.root }}
         run: |
           if [ -f uv.lock ] && [ -z "$PYPI_API_TOKEN" ]; then
             echo "::warning::PYPI_API_TOKEN is not set; a Python publish will fail."
           fi
-          if [ -f pnpm-lock.yaml ] && [ -z "$NPM_TOKEN" ]; then
+          if [ -f "$PNPM_ROOT/pnpm-lock.yaml" ] && [ -z "$NPM_TOKEN" ]; then
             echo "::warning::NPM_TOKEN is not set; an npm publish will fail."
           fi
 

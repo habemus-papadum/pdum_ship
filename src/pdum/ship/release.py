@@ -3,7 +3,8 @@
 Order of an execution, for each package in the plan:
 
 1. write the release version into the manifest (and re-lock);
-2. build and check the built files carry no ``+dev``;
+2. run the package's ``before-build`` commands, then build and check the built files
+   carry no ``+dev`` (a package with ``build = false`` is neither built nor published here);
 3. run the tests;
 4. publish;
 5. commit, tag ``<component>-v<version>``, push commit and tags atomically;
@@ -228,6 +229,11 @@ def _run_shell(command: str, cwd: Path, say: Say) -> None:
         raise ReleaseError(f"command failed ({proc.returncode}): {command}")
 
 
+def _pnpm(config: Config) -> list[str]:
+    """``pnpm`` as run from the repository root, entering the workspace when it is nested."""
+    return ["pnpm"] if config.pnpm_root == "." else ["pnpm", "-C", config.pnpm_root]
+
+
 def default_tests(config: Config, package: Package) -> list[str]:
     override = config.package(package.name).test
     if override is not None:
@@ -236,14 +242,15 @@ def default_tests(config: Config, package: Package) -> list[str]:
         return config.test
     if package.ecosystem == "python":
         return ["uv run --locked pytest"]
-    if str(package.dir) == ".":
-        return ["pnpm test"]
-    return [f"pnpm --filter {package.name} test"]
+    pnpm = " ".join(_pnpm(config))
+    if config.is_pnpm_root(package.dir):
+        return [f"{pnpm} test"]
+    return [f"{pnpm} --filter {package.name} test"]
 
 
 def _version_files(config: Config, package: Package) -> list[Path]:
     files = [config.root / package.manifest]
-    lock = lockfile_for(config.root, package)
+    lock = lockfile_for(config, package)
     if lock is not None:
         files.append(lock)
     return files
@@ -258,14 +265,20 @@ def _npm_has_script(root: Path, package: Package, script: str) -> bool:
 
 def _build(config: Config, item: PackagePlan, say: Say) -> list[Path]:
     package = item.package
+    settings = config.package(package.name)
+    for command in settings.before_build:
+        _run_shell(command, config.root, say)
+    if not settings.build:
+        say(f"→ {package.name} is marked build = false; another workflow builds and publishes it from the tag")
+        return []
     if package.ecosystem == "npm":
         # Build the package and the workspace packages it depends on; pnpm publish packs
         # whatever `files` names, so the build must come first.
         if _npm_has_script(config.root, package, "build"):
-            if str(package.dir) == ".":
-                _run(["pnpm", "run", "build"], config.root, say)
+            if config.is_pnpm_root(package.dir):
+                _run(["pnpm", "run", "build"], config.pnpm_dir, say)
             else:
-                _run(["pnpm", "--filter", f"{package.name}...", "run", "build"], config.root, say)
+                _run(["pnpm", "--filter", f"{package.name}...", "run", "build"], config.pnpm_dir, say)
         return []
     out_dir = config.root / "dist" / package.tag_component
     if out_dir.exists():
@@ -292,7 +305,7 @@ def _publish(config: Config, item: PackagePlan, files: list[Path], say: Say) -> 
         _run(["uv", "publish", *(str(f) for f in files)], config.root, say)
         return
     # `--filter` needs the recursive form; a bare `pnpm publish` publishes the root package.
-    if str(package.dir) == ".":
+    if config.is_pnpm_root(package.dir):
         args = ["pnpm", "publish", "--no-git-checks", "--access", "public"]
     else:
         args = ["pnpm", "-r", "publish", "--filter", package.name, "--no-git-checks", "--access", "public"]
@@ -300,7 +313,7 @@ def _publish(config: Config, item: PackagePlan, files: list[Path], say: Say) -> 
     # still authenticates with the token; the attestation only records where the build ran.
     if os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"):
         args.append("--provenance")
-    _run(args, config.root, say)
+    _run(args, config.pnpm_dir, say)
 
 
 def execute(

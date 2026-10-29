@@ -1,8 +1,9 @@
 """Discover the publishable packages in a repository and read or write their versions.
 
 Python packages come from the root ``pyproject.toml`` and the ``[tool.uv.workspace]``
-members. npm packages come from ``pnpm-workspace.yaml`` and the root ``package.json``.
-A package is one that can be published: a Python project with a ``[project]`` table
+members. npm packages come from ``pnpm-workspace.yaml`` and the ``package.json`` of the
+pnpm workspace root, which is the repository root unless ``[tool.ship] pnpm-root`` names
+a subdirectory. A package is one that can be published: a Python project with a ``[project]`` table
 that uv does not mark ``package = false``, or an npm package that is not ``private``.
 """
 
@@ -103,16 +104,17 @@ def _python_packages(root: Path, config: Config) -> list[Package]:
 
 def _npm_packages(root: Path, config: Config) -> list[Package]:
     dirs: list[Path] = []
-    if (root / "package.json").exists():
-        dirs.append(root)
-    workspace_file = root / "pnpm-workspace.yaml"
+    base = config.pnpm_dir
+    if (base / "package.json").exists():
+        dirs.append(base)
+    workspace_file = base / "pnpm-workspace.yaml"
     if workspace_file.exists():
         workspace = yaml.safe_load(workspace_file.read_text()) or {}
         for pattern in workspace.get("packages", []) or []:
             negate = pattern.startswith("!")
             if negate:
                 continue
-            for member in sorted(root.glob(pattern)):
+            for member in sorted(base.glob(pattern)):
                 if (member / "package.json").exists() and member not in dirs:
                     dirs.append(member)
 
@@ -127,8 +129,8 @@ def _npm_packages(root: Path, config: Config) -> list[Package]:
             Package(
                 name=name,
                 ecosystem="npm",
-                dir=directory.relative_to(root),
-                manifest=manifest.relative_to(root),
+                dir=directory.relative_to(root.resolve()),
+                manifest=manifest.relative_to(root.resolve()),
                 tag_component=config.package(name).tag or unscoped(name),
             )
         )
@@ -182,7 +184,9 @@ def write_version(root: Path, package: Package, version: str, *, relock: bool = 
     manifest.write_text(new_text)
 
 
-def lockfile_for(root: Path, package: Package) -> Path | None:
-    name = "uv.lock" if package.ecosystem == "python" else "pnpm-lock.yaml"
-    path = root / name
+def lockfile_for(config: Config, package: Package) -> Path | None:
+    if package.ecosystem == "python":
+        path = config.root / "uv.lock"
+    else:
+        path = config.pnpm_dir / "pnpm-lock.yaml"
     return path if path.exists() else None

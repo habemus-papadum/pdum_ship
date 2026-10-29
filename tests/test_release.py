@@ -198,12 +198,15 @@ def test_pnpm_package_release_builds_tags_and_restores(pnpm_repo):
     assert pnpm_repo.origin_tags() == ["plugin-v0.1.0"]
 
     # The build ran for the package and its workspace dependency before publishing.
-    assert (cfg.root / "packages" / "plugin" / "dist" / "index.js").exists()
-    assert (cfg.root / "packages" / "core" / "dist" / "index.js").exists()
+    core = packages_mod.find(pkgs, "@demo/core")
+    assert (cfg.root / plugin.dir / "dist" / "index.js").exists()
+    assert (cfg.root / core.dir / "dist" / "index.js").exists()
+    # The default test command enters a nested workspace.
+    expected_prefix = "pnpm" if cfg.pnpm_root == "." else f"pnpm -C {cfg.pnpm_root}"
+    assert release.default_tests(cfg, plugin) == [f"{expected_prefix} --filter @demo/plugin test"]
 
     repo, cfg, pkgs = load(pnpm_repo)
     assert packages_mod.read_version(cfg.root, plugin) == "0.1.0+dev"
-    core = packages_mod.find(pkgs, "@demo/core")
     assert packages_mod.read_version(cfg.root, core) == "0.0.0+dev"
     assert repo.is_clean()
     # The lockfile is still consistent with the manifests and the peer range is untouched.
@@ -213,7 +216,47 @@ def test_pnpm_package_release_builds_tags_and_restores(pnpm_repo):
     manifest = json.loads((cfg.root / plugin.manifest).read_text())
     assert manifest["peerDependencies"] == {"@demo/core": "workspace:>=0.0.0"}
     tagged = repo.tag_commit("plugin-v0.1.0")
-    assert '"version": "0.1.0"' in repo.git("show", f"{tagged}:packages/plugin/package.json")
+    assert '"version": "0.1.0"' in repo.git("show", f"{tagged}:{plugin.manifest}")
+    # The lockfile ship would commit is the one in the workspace directory.
+    lock = packages_mod.lockfile_for(cfg, plugin)
+    assert lock is not None and lock.parent == cfg.pnpm_dir
+
+
+def test_build_false_tags_without_building_and_before_build_runs(workspace_repo):
+    pyproject = workspace_repo.root / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text()
+        + '\n[tool.ship.packages."demo-b"]\nbuild = false\n'
+        + '\n[tool.ship.packages."demo-a"]\nbefore-build = ["echo built > prebuilt.txt"]\n'
+    )
+    workspace_repo.commit_all("configure builds")
+    workspace_repo.git("push", "-q", "origin", "main")
+    _, cfg, _ = load(workspace_repo)
+    assert cfg.package("demo-b").build is False and cfg.package("demo-b").publish is False
+
+    plan = do_release(workspace_repo, "demo-b", "minor")
+    assert plan.items[0].tag == "demo-b-v0.1.0"
+    assert workspace_repo.origin_tags() == ["demo-b-v0.1.0"]
+    assert not (cfg.root / "dist" / "demo-b").exists()
+    assert any("build = false" in line for line in NOISE)
+
+    do_release(workspace_repo, "demo-a", "minor")
+    assert (cfg.root / "prebuilt.txt").read_text().strip() == "built"
+    assert (cfg.root / "dist" / "demo-a").exists()
+
+
+def test_config_refuses_publish_without_build(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0"\n\n[tool.ship]\nours = ["x-*"]\n'
+        '[tool.ship.packages."x-wheel"]\nbuild = false\npublish = true\n'
+    )
+    with pytest.raises(config_mod.ConfigError, match="cannot publish"):
+        config_mod.load(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0"\n\n[tool.ship]\nours = ["x-*"]\npnpm-root = "missing"\n'
+    )
+    with pytest.raises(config_mod.ConfigError, match="pnpm-root"):
+        config_mod.load(tmp_path)
 
 
 def test_ignore_subjects_excludes_an_old_pipelines_commits(single_repo):

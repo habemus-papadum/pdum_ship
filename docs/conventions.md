@@ -374,6 +374,55 @@ own workflows, which errors when the two disagree. A version literal the
 old script mirrored into TypeScript (`src/version.ts`) is deleted with the
 script.
 
+## A pnpm workspace in a subdirectory
+
+Some repositories keep the pnpm workspace under a subdirectory (`widgets/`)
+beside a Python package at the root. Set `pnpm-root = "widgets"` in
+`[tool.ship]`. ship then reads `widgets/pnpm-workspace.yaml` and
+`widgets/package.json`, runs `pnpm` there, and commits
+`widgets/pnpm-lock.yaml` with a release. The reusable workflow reads the
+same setting: it installs pnpm from `widgets/package.json`'s
+`packageManager` and runs `pnpm -C widgets install --frozen-lockfile`. A
+public `package.json` at the workspace root is itself a package (ship
+publishes it with a bare `pnpm publish` in that directory); the members
+publish with `pnpm -r publish --filter`. The default test command becomes
+`pnpm -C widgets --filter <name> test`. Everything else follows the pnpm
+procedure; `shared-paths` names `widgets/pnpm-workspace.yaml`.
+
+## A package built outside ship
+
+ship builds with `uv build` on the workflow's Linux runner. A distribution
+that needs another platform or an SDK the runner lacks (a CUDA extension, a
+macOS framework binding) keeps its own build workflow and tells ship not to
+build it:
+
+```toml
+[tool.ship.packages."habemus-papadum-nvenc"]
+build = false
+```
+
+`ship release habemus-papadum-nvenc --bump patch` then writes the version,
+runs the tests, commits, tags `habemus-papadum-nvenc-v<version>`, pushes,
+and creates the GitHub release without assets; it uploads nothing
+(`build = false` implies `publish = false`). The build workflow runs on that
+tag (`on: push: tags: ["habemus-papadum-nvenc-v*"]`), checks the tag out,
+builds the wheels, publishes them with `uv publish` under `PYPI_API_TOKEN`,
+and attaches them to the release (`gh release upload`). The registry check
+before a release still applies: when a build workflow failed, re-run it for
+the tag; do not release again.
+
+A distribution whose `uv build` needs generated inputs (a widget bundle
+packed into the wheel) lists the commands that produce them:
+
+```toml
+[tool.ship.packages."habemus-papadum-rfb"]
+before-build = ["pnpm -C widgets build:anywidget", "pnpm -C widgets build:demo"]
+```
+
+They run from the repository root, in order, before `uv build`. The
+workflow has installed the pnpm workspace by then; list the build steps
+only.
+
 ## Adding a package
 
 In a repository that already uses ship:
