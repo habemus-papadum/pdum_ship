@@ -149,6 +149,14 @@ and a table of what moved. With `--all`, third-party packages move too, within
 their declared ranges and behind the release-age gates. The lockfile is left
 uncommitted. `--dry-run` prints the commands; `--no-test` skips the tests.
 
+Without `--all`, a third-party package that is **downgraded or removed** is an
+error: upgrading one of our packages can add or raise a third-party
+requirement, but cannot lower one, so such a move means the resolver did
+something to look at. ship restores the lockfiles and prints the moves;
+`--allow-downgrades` accepts them (for example when one of our packages added
+an upper bound). Any failure — the lock command, the install, the tests —
+restores the lockfiles and reports the moves that were attempted.
+
 ### `ship deps check [--hook]`
 
 Reports, and exits 1 on any of:

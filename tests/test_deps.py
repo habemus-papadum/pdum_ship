@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from pdum.ship import config as config_mod
 from pdum.ship import deps
 from pdum.ship import packages as packages_mod
@@ -113,3 +115,47 @@ def test_pnpm_lock_key_parsing():
     assert deps._PNPM_KEY_RE.match("@demo/core@0.24.0").groupdict() == {"name": "@demo/core", "version": "0.24.0"}
     m = deps._PNPM_KEY_RE.match("vite@8.3.3(@types/node@22.0.0)")
     assert m.group("name") == "vite" and m.group("version") == "8.3.3"
+
+
+def test_moved_kind_spots_downgrades_and_removals():
+    assert deps.Moved("a", None, "1.0.0").kind == "added"
+    assert deps.Moved("a", "1.0.0", None).kind == "removed"
+    assert deps.Moved("a", "4.6.2", "3.6.8").kind == "downgraded"
+    assert deps.Moved("a", "0.3.0", "0.4.0").kind == "upgraded"
+    assert deps.Moved("a", "1.33.1-dev45.0", "1.33.1-dev64.0").kind == "upgraded"  # equal numeric prefix
+    assert deps._version_key("2.0.0-rc.13") == (2, 0, 0)
+    assert deps._version_key("8.3.3") < deps._version_key("8.10.0")
+
+
+def test_refresh_refuses_third_party_downgrades(single_repo, monkeypatch):
+    """A refresh of ours that downgrades a third-party package is reverted and reported."""
+    repo, cfg, pkgs = load(single_repo)
+    lock = single_repo.root / "uv.lock"
+    original = lock.read_text()
+    snapshots = iter([{"demo-lib": "1.0.0", "attrs": "24.0.0"}, {"demo-lib": "1.1.0", "attrs": "23.0.0"}])
+    monkeypatch.setattr(deps, "lock_versions", lambda root: next(snapshots))
+    monkeypatch.setattr(deps, "uv_lock_registry_packages", lambda root: {"demo-lib", "attrs"})
+
+    def fake_run(args, cwd=None, **kwargs):
+        if args[:2] == ["uv", "lock"]:
+            lock.write_text(original + "\n# churned\n")
+
+        class Done:
+            returncode = 0
+
+        return Done()
+
+    monkeypatch.setattr(deps.subprocess, "run", fake_run)
+    with pytest.raises(deps.RefreshError, match="downgraded or removed third-party"):
+        deps.refresh(
+            repo,
+            cfg,
+            pkgs,
+            everything=False,
+            run_tests=False,
+            dry_run=False,
+            allow_downgrades=False,
+            say=lambda _: None,
+        )
+    assert lock.read_text() == original  # restored
+    assert repo.is_clean()

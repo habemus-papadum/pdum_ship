@@ -75,6 +75,46 @@ class Moved:
     before: str | None
     after: str | None
 
+    @property
+    def kind(self) -> str:
+        """``added``, ``removed``, ``upgraded`` or ``downgraded``."""
+        if self.before is None:
+            return "added"
+        if self.after is None:
+            return "removed"
+        return "downgraded" if _version_key(self.after) < _version_key(self.before) else "upgraded"
+
+
+def _version_key(text: str) -> tuple:
+    """Order versions by their leading numeric components; good enough to spot a downgrade."""
+    parts: list[int] = []
+    for piece in re.split(r"[.+-]", text):
+        if piece.isdigit():
+            parts.append(int(piece))
+        else:
+            break
+    return tuple(parts)
+
+
+class RefreshError(RuntimeError):
+    """A refresh did not complete; the lockfiles are back as they were."""
+
+
+def _lockfiles(root: Path) -> list[Path]:
+    return [p for p in (root / "uv.lock", root / "pnpm-lock.yaml") if p.exists()]
+
+
+def _moved(before: dict[str, str], after: dict[str, str]) -> list[Moved]:
+    return [
+        Moved(name, before.get(name), after.get(name))
+        for name in sorted(set(before) | set(after))
+        if before.get(name) != after.get(name)
+    ]
+
+
+def _table(moved: list[Moved]) -> str:
+    return "\n".join(f"  {m.name}\t{m.before or '-'}\t{m.after or '-'}\t{m.kind}" for m in moved)
+
 
 def refresh(
     repo: Repo,
@@ -84,11 +124,26 @@ def refresh(
     everything: bool,
     run_tests: bool,
     dry_run: bool,
+    allow_downgrades: bool,
     say,
 ) -> list[Moved]:
+    """Upgrade our packages (or everything), reinstall, test, and report what moved.
+
+    In the house-only mode a third-party package that is downgraded or removed is treated
+    as an error: upgrading one of our packages can add or raise a third-party requirement,
+    but it cannot legitimately lower one, so such a move means the resolver did something
+    the operator should look at. ``allow_downgrades`` accepts it. Any failure restores the
+    lockfiles to their committed state.
+    """
     root = config.root
     before = lock_versions(root)
     workspace_names = {p.name for p in packages}
+    lockfiles = [p.relative_to(root) for p in _lockfiles(root)]
+
+    def restore(message: str) -> RefreshError:
+        if lockfiles:
+            repo.checkout_paths(lockfiles)
+        return RefreshError(message + "\nThe lockfiles are back as they were.")
 
     commands: list[list[str]] = []
     if (root / "uv.lock").exists():
@@ -120,23 +175,37 @@ def refresh(
             continue
         proc = subprocess.run(args, cwd=root)
         if proc.returncode != 0:
-            raise RuntimeError(f"command failed: {' '.join(args)}")
+            raise restore(f"command failed: {' '.join(args)}")
     if dry_run:
         return []
 
-    if (root / "uv.lock").exists():
-        subprocess.run(["uv", "sync", "--locked"], cwd=root, check=True)
-    if (root / "pnpm-lock.yaml").exists():
-        subprocess.run(["pnpm", "install", "--frozen-lockfile"], cwd=root, check=True)
+    moved = _moved(before, lock_versions(root))
+    if not moved:
+        return []
 
-    after = lock_versions(root)
-    moved = [
-        Moved(name, before.get(name), after.get(name))
-        for name in sorted(set(before) | set(after))
-        if before.get(name) != after.get(name)
-    ]
+    if not everything:
+        suspicious = [m for m in moved if not config.is_ours(m.name) and m.kind in ("downgraded", "removed")]
+        if suspicious and not allow_downgrades:
+            raise restore(
+                "refreshing our packages also downgraded or removed third-party packages, which an "
+                "upgrade of ours cannot require:\n"
+                + _table(suspicious)
+                + "\nAll moves:\n"
+                + _table(moved)
+                + "\nPass --allow-downgrades if this is intended (for example, one of our packages added "
+                "an upper bound), or investigate the resolution."
+            )
 
-    if run_tests and moved:
+    for args in (["uv", "sync", "--locked"], ["pnpm", "install", "--frozen-lockfile"]):
+        lock = root / ("uv.lock" if args[0] == "uv" else "pnpm-lock.yaml")
+        if not lock.exists():
+            continue
+        say(f"  $ {' '.join(args)}")
+        proc = subprocess.run(args, cwd=root)
+        if proc.returncode != 0:
+            raise restore(f"install failed after the lockfile moved:\n{_table(moved)}\n  $ {' '.join(args)}")
+
+    if run_tests:
         seen: set[str] = set()
         for package in packages:
             from .release import default_tests  # local import: release imports deps
@@ -148,7 +217,7 @@ def refresh(
                 say(f"  $ {command}")
                 proc = subprocess.run(command, cwd=root, shell=True)
                 if proc.returncode != 0:
-                    raise RuntimeError(f"tests failed after refresh: {command}")
+                    raise restore(f"tests failed after the lockfile moved:\n{_table(moved)}\n  $ {command}")
     return moved
 
 

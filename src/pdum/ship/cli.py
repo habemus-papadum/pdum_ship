@@ -160,14 +160,30 @@ def deps_refresh(
     ] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Print the commands; change nothing")] = False,
     no_test: Annotated[bool, typer.Option("--no-test", help="Do not run the tests after refreshing")] = False,
+    allow_downgrades: Annotated[
+        bool,
+        typer.Option(
+            "--allow-downgrades",
+            help="Accept third-party packages being downgraded or removed while refreshing ours",
+        ),
+    ] = False,
 ) -> None:
     """Upgrade our packages in the lockfiles to their newest releases, then test."""
     repo, cfg, pkgs = _load()
     if not repo.is_clean():
         fail("the working tree has uncommitted changes; refresh needs a clean tree")
     try:
-        moved = deps.refresh(repo, cfg, pkgs, everything=all_packages, run_tests=not no_test, dry_run=dry_run, say=say)
-    except RuntimeError as exc:
+        moved = deps.refresh(
+            repo,
+            cfg,
+            pkgs,
+            everything=all_packages,
+            run_tests=not no_test,
+            dry_run=dry_run,
+            allow_downgrades=allow_downgrades,
+            say=say,
+        )
+    except deps.RefreshError as exc:
         fail(str(exc))
         raise
     if dry_run:
@@ -176,9 +192,13 @@ def deps_refresh(
         say("lockfiles unchanged")
         return
     say("")
-    say("package\tbefore\tafter")
+    say("package\tbefore\tafter\tchange")
     for m in moved:
-        say(f"{m.name}\t{m.before or '-'}\t{m.after or '-'}")
+        say(f"{m.name}\t{m.before or '-'}\t{m.after or '-'}\t{m.kind}")
+    others = [m for m in moved if not cfg.is_ours(m.name)]
+    if others and not all_packages:
+        say("")
+        say(f"{len(others)} third-party package(s) moved with ours (new or raised requirements)")
     say("")
     say("the lockfile is updated and not committed")
 
