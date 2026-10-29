@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "habemus-papadum-ship"
-version = "0.0.0+dev"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },
