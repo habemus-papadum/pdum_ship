@@ -385,6 +385,12 @@ token. A Python-only repository grants it too and simply does not use it.
 The reusable workflow also takes `ci_workflow` (default `ci.yml`) and
 `uv_version`.
 
+Consecutive releases reuse green CI across version-only commits; source,
+dependency and configuration changes still require fresh CI. Do not add
+`skip_ci_check` to work around ship's release commits. Dispatch packages one
+at a time after the previous run finishes; the input is a single package name.
+See the README's release-workflow section for the exact reuse rule.
+
 ## The CI snippet
 
 `ship deps check` reads tags and lockfiles, so CI needs the full history and

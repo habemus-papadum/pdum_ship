@@ -73,6 +73,17 @@ adding a package, and the policy paragraph for agent instructions. The
 `ship-adopt` skill fronts it. For this estate, `ours` is
 `["habemus-papadum-*", "@habemus-papadum/*"]`.
 
+## Workflow fixes (2026-10-29)
+
+The shared release workflow propagates failures through its summary pipeline
+and reuses green CI across version-only release commits. Callers on `@main`
+receive both fixes without a CLI upgrade or permission changes. The gate
+compares manifests and local `uv.lock` versions; it requires fresh CI for
+source, dependency or configuration changes. Regression coverage exercises
+the workflow itself, including failed/pending CI and publishing command
+failures. The gate also passed against CF's actual post-release history;
+hosted workflow verification is pending.
+
 ## Open items
 
 - `ship-check` at tag `habemus-papadum-ship-v0.1.0` has an invalid manifest

@@ -224,8 +224,28 @@ Copy it from there rather than from another repository.
 The caller must grant `contents: write`, `actions: read` and
 `id-token: write`: the reusable job requests all three, and a caller that
 grants less fails as `startup_failure` with no log. The workflow waits for
-the `ci.yml` run on the same commit to succeed (input `ci_workflow` renames
-it; `skip_ci_check` overrides it), sets the git identity, installs the
+`ci.yml` to succeed (input `ci_workflow` renames it; `skip_ci_check` overrides
+it). A green run on an ancestor also counts when every intervening commit
+changes only package version metadata: a manifest's own version and local
+workspace package versions in `uv.lock`. Source, dependency requirements,
+external locked versions, configuration, file additions/deletions and mode
+changes require fresh CI. The nearest commit with a CI run takes precedence;
+a pending or failed run cannot be hidden by an older green run. Both push and
+manually dispatched CI runs count.
+
+This lets consecutive per-package releases reuse the CI that tested their
+source. GitHub does not trigger push CI for ship's own `GITHUB_TOKEN` commits.
+Release build and test commands still run for every package unless explicitly
+skipped. Run packages sequentially, dispatching each after the previous run
+finishes so it starts from the updated branch. The `package` input accepts one
+name, not a comma-separated list.
+
+The workflow uses Bash with `pipefail`, so a failed build, test or publish
+fails the job even though its output is copied into the step summary. These
+workflow fixes apply to callers using `release.yml@main` without upgrading
+their locked CLI or changing their permissions.
+
+The workflow sets the git identity, installs the
 repository with `uv sync --locked`, exports the tokens, and runs
 `uv run ship release`. For a pnpm workspace it installs pnpm and Node — the
 version in `.nvmrc` when the repository has one, otherwise the

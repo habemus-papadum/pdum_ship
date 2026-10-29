@@ -103,6 +103,9 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash   # Includes pipefail: tee must not hide a failed ship command.
     permissions:
       contents: write
       actions: read
@@ -165,26 +168,105 @@ jobs:
           cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
 
-      - name: Require a successful CI run for this commit
+      - name: Require a successful CI run
         if: ${{ !inputs.skip_ci_check }}
         env:
           SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
           WORKFLOW: ${{ inputs.ci_workflow }}
+        shell: python
         run: |
-          for attempt in $(seq 1 60); do
-            row=$(gh run list --workflow "$WORKFLOW" --commit "$SHA" --event push --limit 1 \
-              --json status,conclusion --jq '.[0] | select(. != null) | [.status, (.conclusion // "")] | @tsv')
-            IFS=$'\t' read -r status conclusion <<< "$row"
-            if [ "$status" = completed ]; then
-              if [ "$conclusion" = success ]; then exit 0; fi
-              echo "::error::$WORKFLOW concluded '$conclusion' for $SHA."
-              exit 1
-            fi
-            echo "Waiting for $WORKFLOW ($attempt/60)."
-            sleep 30
-          done
-          echo "::error::Timed out waiting for $WORKFLOW."
-          exit 1
+          import json
+          import os
+          from pathlib import PurePosixPath
+          import subprocess
+          import time
+          import tomllib
+
+
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+
+
+          def normalized(path, text):
+              # Release commits may change only the package's own version, never requirements.
+              if PurePosixPath(path).name == "package.json":
+                  data = json.loads(text)
+                  del data["version"]
+              elif PurePosixPath(path).name == "pyproject.toml":
+                  data = tomllib.loads(text)
+                  del data["project"]["version"]
+              elif path == "uv.lock":
+                  data = tomllib.loads(text)
+                  for package in data.get("package", []):
+                      source = package.get("source", {})
+                      if "editable" in source or "virtual" in source:
+                          package.pop("version", None)
+              else:
+                  raise ValueError("not a release version file")
+              return data
+
+
+          def only_versions(parent, commit):
+              entries = git("diff", "--raw", "--no-renames", "-z", parent, commit).split("\0")
+              for header, path in zip(entries[::2], entries[1::2]):
+                  old_mode, new_mode, _, _, status = header.split()
+                  if old_mode[1:] != new_mode or status != "M":
+                      return False
+                  try:
+                      before = normalized(path, git("show", f"{parent}:{path}"))
+                      after = normalized(path, git("show", f"{commit}:{path}"))
+                  except (ValueError, KeyError, TypeError):
+                      return False
+                  if before != after:
+                      return False
+              return True
+
+
+          def candidates(head):
+              result = [head]
+              while True:
+                  parents = git("rev-list", "--parents", "-n", "1", result[-1]).split()[1:]
+                  if len(parents) != 1 or not only_versions(parents[0], result[-1]):
+                      return result
+                  result.append(parents[0])
+
+
+          def choose_run(commits, runs):
+              # Prefer the nearest commit's latest run, including pending and failed runs.
+              # Never hide a failed current run behind an older successful one.
+              for commit in commits:
+                  for run in runs:
+                      if run["headSha"] == commit and run["event"] in ("push", "workflow_dispatch"):
+                          return run
+              return None
+
+
+          def main():
+              head = os.environ["SHA"]
+              workflow = os.environ["WORKFLOW"]
+              commits = candidates(head)
+              for attempt in range(60):
+                  runs = json.loads(subprocess.check_output([
+                      "gh", "run", "list", "--workflow", workflow,
+                      "--branch", os.environ["BRANCH"], "--limit", "100",
+                      "--json", "headSha,status,conclusion,url,event",
+                  ], text=True))
+                  run = choose_run(commits, runs)
+                  if run and run["status"] == "completed":
+                      if run["conclusion"] != "success":
+                          raise SystemExit(f"::error::{workflow} concluded {run['conclusion']!r}: {run['url']}")
+                      print(f"CI passed for {run['headSha']}: {run['url']}")
+                      if run["headSha"] != head:
+                          print(f"Reusing CI for {head}: only package version metadata changed.")
+                      return
+                  print(f"Waiting for {workflow} ({attempt + 1}/60).", flush=True)
+                  time.sleep(30)
+              raise SystemExit(f"::error::Timed out waiting for {workflow} on {head} or a version-only ancestor.")
+
+
+          if __name__ == "__main__":
+              main()
 
       - name: Install the repository
         env:
@@ -224,4 +306,4 @@ jobs:
           if [ -n "$PACKAGE" ]; then args=(release "$PACKAGE" --bump "$BUMP"); fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then args+=(--dry-run); fi
           if [ "${{ inputs.skip_tests }}" = "true" ]; then args+=(--skip-tests); fi
-          uv run --locked ship "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          uv run --locked ship "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
