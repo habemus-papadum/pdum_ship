@@ -32,8 +32,10 @@ _LINK_REWRITES = {
     "../../docs/conventions.md": "conventions.md",
 }
 
+# No version in the header: a copy is stale only when its content differs from what the
+# installed ship would write, so a release of ship that changes no skill text changes nothing.
 HEADER = (
-    "<!-- Written by `ship skills sync` from habemus-papadum-ship {version}. Do not edit;"
+    "<!-- Written by `ship skills sync` from the installed habemus-papadum-ship. Do not edit;"
     " change the source in pdum_ship and run the sync again. -->\n"
 )
 
@@ -72,8 +74,7 @@ def render(skill: str) -> dict[str, str]:
     match = _FRONTMATTER_END.match(text)
     if not match:
         raise SkillsError(f"skills/{skill}/SKILL.md has no frontmatter")
-    header = HEADER.format(version=__version__)
-    text = text[: match.end()] + "\n" + header + text[match.end() :].lstrip("\n")
+    text = text[: match.end()] + "\n" + HEADER + text[match.end() :].lstrip("\n")
     files = {"SKILL.md": text}
     for name, source in COMPANIONS[skill].items():
         body = _read(source)

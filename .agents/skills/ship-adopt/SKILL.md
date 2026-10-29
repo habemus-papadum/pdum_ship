@@ -3,7 +3,7 @@ name: ship-adopt
 description: Use when bringing a repository into the ship release model or keeping it there — a repository that still releases with its own scripts, a lockstep versioning script, `-alpha` or hand-edited versions, or no release process; adding a new publishable package to a repository that already uses ship; adding the `[tool.ship]` table, the baseline tags, the release workflow, the pre-commit hook or the agent instructions; or when `ship deps check` reports a repository out of policy and the fix is structural rather than a one-line edit. Fronts docs/conventions.md, which is the procedure.
 ---
 
-<!-- Written by `ship skills sync` from habemus-papadum-ship 0.1.1+dev. Do not edit; change the source in pdum_ship and run the sync again. -->
+<!-- Written by `ship skills sync` from the installed habemus-papadum-ship. Do not edit; change the source in pdum_ship and run the sync again. -->
 # Adopting ship in a repository
 
 Read [the conventions](conventions.md) before changing anything;

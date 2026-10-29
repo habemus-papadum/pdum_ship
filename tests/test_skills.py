@@ -38,7 +38,8 @@ def test_render_makes_each_skill_directory_self_contained():
     for skill in skills.SKILLS:
         files = skills.render(skill)
         assert set(files) == {"SKILL.md", *skills.COMPANIONS[skill]}
-        assert __version__ in files["SKILL.md"]
+        assert skills.HEADER in files["SKILL.md"]
+        assert __version__ not in files["SKILL.md"]  # a release alone must not stale the copies
         assert files["SKILL.md"].startswith("---\n")
         for name, content in files.items():
             for target in _links(content):

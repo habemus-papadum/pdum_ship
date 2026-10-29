@@ -3,7 +3,7 @@ name: ship-release
 description: Use when working in a repository that releases with ship (a `[tool.ship]` table in its pyproject.toml) and the task touches a release, a version, a tag, a lockfile, or a dependency on one of the repository's own packages — releasing a package, deciding whether to release, refreshing dependencies to their newest releases, running the policy check, reading what changed since the last release, or answering why a manifest version ends in `+dev`. Fronts the ship README; the README is the specification.
 ---
 
-<!-- Written by `ship skills sync` from habemus-papadum-ship 0.1.1+dev. Do not edit; change the source in pdum_ship and run the sync again. -->
+<!-- Written by `ship skills sync` from the installed habemus-papadum-ship. Do not edit; change the source in pdum_ship and run the sync again. -->
 # Releasing and dependencies with ship
 
 Read [the README](README.md) before acting; it defines the model and
