@@ -7,6 +7,7 @@ PyPI the first time, so the release tests need network access.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -146,6 +147,8 @@ def pnpm_repo(tmp_path: Path) -> DemoRepo:
 
     The root ``pyproject.toml`` exists only to hold ``[tool.ship]``; it is not a package.
     """
+    if shutil.which("pnpm") is None:
+        pytest.skip("pnpm is not installed")
     root = tmp_path / "pn"
     root.mkdir()
     origin = tmp_path / "pn-origin.git"
