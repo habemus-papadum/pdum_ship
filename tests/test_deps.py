@@ -136,7 +136,12 @@ def test_refresh_refuses_third_party_downgrades(single_repo, monkeypatch):
     monkeypatch.setattr(deps, "lock_versions", lambda root: next(snapshots))
     monkeypatch.setattr(deps, "uv_lock_registry_packages", lambda root: {"demo-lib", "attrs"})
 
+    real_run = deps.subprocess.run
+
     def fake_run(args, cwd=None, **kwargs):
+        # git (used by the restore) runs for real; uv's lock is simulated as churn.
+        if args[0] == "git":
+            return real_run(args, cwd=cwd, **kwargs)
         if args[:2] == ["uv", "lock"]:
             lock.write_text(original + "\n# churned\n")
 
