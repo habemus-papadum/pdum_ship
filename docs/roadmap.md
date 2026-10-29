@@ -51,7 +51,7 @@ commands.
 
 | Repository | Before | Now | Notes |
 | --- | --- | --- | --- |
-| `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 to 0.6.0 through the workflow the same day | 0.5.0 refuses a refresh that downgrades or removes third-party packages; 0.6.0 adds npm provenance, tag fetching before checks, the local hook form |
+| `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 to 0.7.0 through the workflow the same day | 0.5.0 refuses a refresh that downgrades or removes third-party packages; 0.6.0 adds npm provenance, tag fetching before checks, the local hook form; 0.7.0 installs pnpm from `packageManager`, ignores untracked files in preflight, adds `ship --version` |
 | `pdum_aws` | local `release.sh` + `hatch publish`, `-alpha` marker | **done**: 0.6.1 released 2026-10-29 through the workflow, tag `habemus-papadum-aws-v0.6.1`, manifest `0.6.1+dev` | CI test fixed (console width) on the way |
 | `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | **done**: migrated 2026-10-29 (commit `14881d6`), nine packages decoupled with baseline tags `<package>-v0.8.0`, every sibling dependency a peer with a floor; dry run green | first per-package release pending |
 | `pdum_aiui` | `versioning.mjs`, coupled, `v0.24.0` | next | the merged `codex/credential-sources` and July `pdum_aiui-1d` worktrees were removed 2026-10-29 |
