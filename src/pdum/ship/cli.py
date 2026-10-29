@@ -23,6 +23,8 @@ app = typer.Typer(
 )
 deps_app = typer.Typer(no_args_is_help=True, help="Refresh or check dependencies.")
 app.add_typer(deps_app, name="deps")
+skills_app = typer.Typer(no_args_is_help=True, help="Write ship's agent skills into this repository.")
+app.add_typer(skills_app, name="skills")
 
 
 def say(message: str) -> None:
@@ -190,6 +192,39 @@ def deps_check(
     """Report policy violations: development links, stale lockfiles, pins, peer ranges, version markers."""
     repo, cfg, pkgs = _load()
     problems = deps.check(repo, cfg, pkgs, hook=hook)
+    if not problems:
+        say("ok")
+        return
+    for problem in problems:
+        say(f"✗ {problem}")
+    raise typer.Exit(1)
+
+
+@skills_app.command(name="sync")
+def skills_sync() -> None:
+    """Write current copies of the skills into .agents/skills and point .claude/skills at them."""
+    from . import skills
+
+    repo = _load()[0]
+    try:
+        changed = skills.sync(repo.root)
+    except skills.SkillsError as exc:
+        fail(str(exc))
+        raise
+    if not changed:
+        say("skills are current")
+        return
+    for path in changed:
+        say(f"wrote {path.relative_to(repo.root)}")
+
+
+@skills_app.command(name="check")
+def skills_check() -> None:
+    """Report skill copies that are missing or stale for this version of ship."""
+    from . import skills
+
+    repo = _load()[0]
+    problems = skills.problems(repo.root)
     if not problems:
         say("ok")
         return

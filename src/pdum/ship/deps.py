@@ -294,4 +294,10 @@ def check(repo: Repo, config: Config, packages: list[Package], *, hook: bool) ->
     problems += marker_problems(repo, config, packages)
     if config.coupled is not None and not config.coupled.strip():
         problems.append("[tool.ship] coupled must give the reason, not an empty string")
+    from . import skills  # local import: skills reads package metadata
+
+    try:
+        problems += skills.problems(config.root)
+    except skills.SkillsError as exc:
+        problems.append(str(exc))
     return problems

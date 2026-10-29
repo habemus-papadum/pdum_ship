@@ -31,6 +31,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pdum"]
 
+# The plugin skills and the documents they point at travel inside the wheel, so
+# `ship skills sync` can write current copies into any repository.
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "pdum/ship/_bundled/skills"
+"README.md" = "pdum/ship/_bundled/README.md"
+"docs/conventions.md" = "pdum/ship/_bundled/docs/conventions.md"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

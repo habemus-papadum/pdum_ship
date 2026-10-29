@@ -1,0 +1,8 @@
+{
+  "name": "ship",
+  "description": "Releases and dependency policy for uv and pnpm repositories: ship-release (release a package, refresh or check dependencies, read versions and tags) and ship-adopt (bring a repository or a new package into the model), fronting this repository's README and docs/conventions.md. The same documents travel inside the habemus-papadum-ship wheel; `ship skills sync` writes them into a repository's own .agents/skills and .claude/skills.",
+  "author": {
+    "name": "Nehal Patel",
+    "email": "nehal@alum.mit.edu"
+  }
+}

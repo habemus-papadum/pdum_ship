@@ -63,30 +63,11 @@ commands.
 
 ## The migration, step by step
 
-For a uv repository (what `pdum_aws` did):
-
-1. Clean tree on `main`, `HEAD` equal to `origin/main`.
-2. Delete the release scripts. Keep setup and notebook helpers.
-3. `pyproject.toml`: add `[tool.ship]` with `ours = ["habemus-papadum-*",
-   "@habemus-papadum/*"]` and `shared-paths = [".github/workflows/**"]`;
-   `uv add --dev habemus-papadum-ship`; remove `hatch` and any interactive
-   release helpers from the dev group; set the version to the development
-   marker of the last release (`uv version 0.6.0+dev --no-sync`).
-4. Read `__version__` from installed metadata; remove the literal.
-5. Baseline tag: `git tag -a <package>-v<last> -m "..." v<last>^{commit}`.
-6. Add `release.yml` calling the reusable workflow with the package name;
-   change `docs.yml` to push on `main`.
-7. Add the `ship-check` hook to `.pre-commit-config.yaml`.
-8. Rewrite the agent instructions and the README's release section.
-9. `uv lock`, `uv sync`, lint, tests, `ship packages`, `ship deps check`,
-   `ship changed`. Commit, push the commit and the baseline tag.
-10. Set the `PYPI_API_TOKEN` repository secret; run the workflow with
-    `dry_run=true`, then for real.
-
-For a pnpm workspace add: a peer-dependency audit (floors, `workspace:>=` not
-`workspace:^`), one baseline tag per package, `NPM_TOKEN` as the secret, an
-`.npmrc` that reads the token from the environment, and the removal of the
-shared-version logic from `release.yml`.
+The procedure lives in [conventions.md](conventions.md): what a compliant
+repository has, the steps for a uv repository and for a pnpm workspace,
+adding a package, and the policy paragraph for agent instructions. The
+`ship-adopt` skill fronts it. For this estate, `ours` is
+`["habemus-papadum-*", "@habemus-papadum/*"]`.
 
 ## Open items
 

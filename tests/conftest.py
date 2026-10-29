@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from pdum.ship import skills
+
 SHIP_TABLE = """
 [tool.ship]
 ours = ["demo-*", "@demo/*"]
@@ -90,6 +92,7 @@ def single_repo(tmp_path: Path) -> DemoRepo:
     (root / "tests" / "test_ok.py").write_text("def test_ok():\n    assert True\n")
     run(["uv", "add", "--dev", "pytest", "--no-sync"], root)
     (root / ".gitignore").write_text(".venv/\ndist/\n__pycache__/\n")
+    skills.sync(root)
     demo.commit_all("initial")
     demo.git("push", "-q", "-u", "origin", "main")
     return demo
@@ -115,6 +118,7 @@ def workspace_repo(tmp_path: Path) -> DemoRepo:
     (root / "tests" / "test_ok.py").write_text("def test_ok():\n    assert True\n")
     run(["uv", "add", "--dev", "pytest", "--no-sync"], root)
     (root / ".gitignore").write_text(".venv/\ndist/\n__pycache__/\n")
+    skills.sync(root)
     demo.commit_all("initial")
     demo.git("push", "-q", "-u", "origin", "main")
     return demo
@@ -173,6 +177,7 @@ def pnpm_repo(tmp_path: Path) -> DemoRepo:
     )
     run(["pnpm", "install", "--offline"], root)
     (root / ".gitignore").write_text("node_modules/\ndist/\n")
+    skills.sync(root)
     demo.commit_all("initial")
     demo.git("push", "-q", "-u", "origin", "main")
     return demo

@@ -225,6 +225,27 @@ from importlib.metadata import version
 __version__ = version("my-package")
 ```
 
+## Skills for agents
+
+This repository is also a plugin for Claude Code and Codex: the manifest is
+`.claude-plugin/plugin.json`, the skills are under `skills/`.
+
+- `ship-release` — releasing, refreshing, checking; what an agent does and
+  does not do in a repository that uses ship. Fronts this README.
+- `ship-adopt` — bringing a repository or a new package into the model.
+  Fronts [`docs/conventions.md`](docs/conventions.md).
+
+The same skills and documents travel inside the wheel. In any repository
+that installs ship:
+
+```sh
+uv run ship skills sync    # writes .agents/skills/ship-*; .claude/skills -> ../.agents/skills
+uv run ship skills check   # reports copies missing or stale for the installed ship
+```
+
+`ship deps check` includes that check, so a repository's copies move with
+its pinned ship version. The copies are generated; edit the source here.
+
 ## Status
 
 0.x. The interface may change between releases.
