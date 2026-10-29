@@ -7,6 +7,42 @@
 name: ship release
 
 on:
+  # This repository releases itself through the same job; other repositories call it.
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to release
+        type: string
+        default: habemus-papadum-ship
+      bump:
+        description: patch, minor or major, applied to the package's last tag
+        type: choice
+        options: [patch, minor, major]
+        default: minor
+      dry_run:
+        description: Plan and print; write nothing
+        type: boolean
+        default: true
+      skip_tests:
+        description: Do not run the test commands before publishing
+        type: boolean
+        default: false
+      ci_workflow:
+        description: The CI workflow file that must have succeeded for this commit
+        type: string
+        default: ci.yml
+      skip_ci_check:
+        description: Release without waiting for the CI workflow
+        type: boolean
+        default: false
+      uv_version:
+        description: uv version to install
+        type: string
+        default: "0.12.17"
+      node_version:
+        description: Node version to install when the repository has a pnpm workspace
+        type: string
+        default: "22"
   workflow_call:
     inputs:
       package:
