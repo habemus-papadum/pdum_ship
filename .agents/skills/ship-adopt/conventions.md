@@ -56,7 +56,9 @@ manifests. Each step ends with a check; stop when one fails.
    is the **baseline**.
 2. **Delete the release scripts** (`release.sh`, `publish.sh`,
    `pre-release.sh`, a versioning script). Read each first; keep anything
-   that is setup rather than release.
+   that is setup rather than release, including a `build.sh` that only syncs
+   the environment, and fix the README and docs lines that described it as
+   a release step (`docs/index.md` is sometimes a symlink to the README).
 3. **`pyproject.toml`.** Append:
 
    ```toml
@@ -67,10 +69,15 @@ manifests. Each step ends with a check; stop when one fails.
    shared-paths = [".github/workflows/**"]
    ```
 
-   Then `uv add --dev habemus-papadum-ship`; remove `hatch` and any
-   interactive release helper from the dev group; set the development
-   marker: `uv version <baseline>+dev --no-sync` (`--package <name>` in a
-   workspace, once per member).
+   Then, in this order: `uv add --dev habemus-papadum-ship`; `uv remove
+   --dev hatch` and any interactive release helper; `uv version
+   <baseline>+dev --no-sync` (`--package <name>` in a workspace, once per
+   member), which rewrites `uv.lock` for the new version; and `uv lock` last
+   so the lockfile is final before the checks. If `uv add` fails saying a
+   package that certainly exists "was not found in the package registry",
+   an extra index from the machine's user-level uv configuration answered
+   badly; retry, or run with `--no-config`. The lockfile records only the
+   indexes the project declares.
 4. **`__version__`.** Replace any literal with
    `importlib.metadata.version("<distribution>")`. Grep `src/`, `tests/`,
    `docs/` and the docs configuration for the literal version and for
@@ -88,12 +95,17 @@ manifests. Each step ends with a check; stop when one fails.
 8. **Skills.** `uv run ship skills sync`. It writes `.agents/skills/ship-*`
    and makes `.claude/skills` a symlink to `../.agents/skills` (or writes
    copies if `.claude/skills` is already a directory). Commit the result.
-9. **Agent instructions and README.** Replace any "humans only" release
-   rules with the policy paragraph below. Replace a "Publishing" section
-   with a short "Releasing" section: releases run from the `release`
-   workflow, each release is tagged `<package>-v<version>`, the version
-   between releases is `<last>+dev`, and
-   `uv run ship release <package> --bump minor --dry-run` shows the plan.
+9. **Agent instructions and README.** Grep both, and the docs, for
+   `release.sh`, `publish`, `-alpha`, `hatch`, `Release Process` and
+   `version`: the old model usually appears in several places (a version
+   rule, a release rule, a Publishing section, a CI/CD release section, a
+   build-system line, an automation-scripts list). Replace each in place;
+   do not add a new section beside an old one. The "humans only" release
+   rules become the policy paragraph below. A "Publishing" section becomes a
+   short "Releasing" section: releases run from the `release` workflow, each
+   release is tagged `<package>-v<version>`, the version between releases is
+   `<last>+dev`, and `uv run ship release <package> --bump minor --dry-run`
+   shows the plan.
 10. **Check.** `uv lock`, `uv sync`, lint, tests, `uv run ship packages`
     (manifest `<baseline>+dev`, last tag the baseline), `uv run ship deps
     check` (`ok`), `uv run ship changed`. The first `ship changed` after
@@ -230,10 +242,12 @@ jobs:
 ```
 
 A repository with one package may hard-code `package:` and drop the input.
-`id-token: write` lets `pnpm publish` attach a provenance attestation (the
-repository, commit and workflow run that built the package, shown on
-npmjs.com); publishing still authenticates with `NPM_TOKEN`. A
-Python-only repository may omit it.
+Keep all three permissions as written: the reusable job requests them, and
+a caller that grants less fails before any step runs, as `startup_failure`
+with no log. `id-token: write` lets `pnpm publish` attach a provenance
+attestation (the repository, commit and workflow run that built the
+package, shown on npmjs.com); publishing still authenticates with the
+token. A Python-only repository grants it too and simply does not use it.
 The reusable workflow also takes `ci_workflow` (default `ci.yml`) and
 `uv_version`.
 

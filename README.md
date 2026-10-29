@@ -220,9 +220,12 @@ jobs:
     permissions:
       contents: write
       actions: read
+      id-token: write
 ```
 
-The workflow waits for the `ci.yml` run on the same commit to succeed (input
+The caller grants all three permissions; the reusable job requests them, and
+a caller that grants less fails as `startup_failure` with no log. The
+workflow waits for the `ci.yml` run on the same commit to succeed (input
 `ci_workflow` renames it; `skip_ci_check` overrides it), sets the git identity,
 installs the repository with `uv sync --locked`, exports the tokens, and runs
 `uv run ship release`. For a pnpm workspace it installs pnpm and Node — the
