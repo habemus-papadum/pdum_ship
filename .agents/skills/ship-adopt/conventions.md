@@ -80,7 +80,7 @@ manifests. Each step ends with a check; stop when one fails.
 6. **`release.yml`.** Create the caller below. Change the documentation
    workflow's trigger to `push: branches: [main]` plus `workflow_dispatch`.
    If CI called a deleted script, fix CI; add the CI snippet below.
-7. **Pre-commit hook.** Add the `ship-check` entry (below) to
+7. **Pre-commit hook.** Add the local `ship-check` entry (below) to
    `.pre-commit-config.yaml`, creating the file if the repository had none.
    `pre-commit` itself is not a dependency of ship: install the hooks with
    `uvx pre-commit install`, or add `pre-commit` to the dev group and use
@@ -226,9 +226,14 @@ jobs:
     permissions:
       contents: write
       actions: read
+      id-token: write   # npm provenance attestations
 ```
 
 A repository with one package may hard-code `package:` and drop the input.
+`id-token: write` lets `pnpm publish` attach a provenance attestation (the
+repository, commit and workflow run that built the package, shown on
+npmjs.com); publishing still authenticates with `NPM_TOKEN`. A
+Python-only repository may omit it.
 The reusable workflow also takes `ci_workflow` (default `ci.yml`) and
 `uv_version`.
 
@@ -251,6 +256,25 @@ A shallow checkout makes every manifest look like it should be
 `0.0.0+dev`.
 
 ## The pre-commit entry
+
+The repository already installs ship through its lockfile, so the hook runs
+that copy; there is no `rev` to bump when ship releases:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: ship-check
+        name: ship deps check (development links, lockfiles, skill copies)
+        entry: uv run --locked ship deps check --hook
+        language: system
+        pass_filenames: false
+        always_run: true
+```
+
+The alternative, for a repository that does not want to run `uv` from the
+hook, is the remote form, which pre-commit installs into its own environment
+at a pinned release and which therefore needs updating when ship releases:
 
 ```yaml
 repos:

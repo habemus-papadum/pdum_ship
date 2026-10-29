@@ -17,6 +17,7 @@ recovery instructions instead.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -295,6 +296,10 @@ def _publish(config: Config, item: PackagePlan, files: list[Path], say: Say) -> 
         args = ["pnpm", "publish", "--no-git-checks", "--access", "public"]
     else:
         args = ["pnpm", "-r", "publish", "--filter", package.name, "--no-git-checks", "--access", "public"]
+    # In GitHub Actions with `id-token: write`, attach a provenance attestation. Publishing
+    # still authenticates with the token; the attestation only records where the build ran.
+    if os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"):
+        args.append("--provenance")
     _run(args, config.root, say)
 
 
