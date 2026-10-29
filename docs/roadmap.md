@@ -56,8 +56,8 @@ commands.
 | --- | --- | --- | --- |
 | `pdum_ship` | — | 0.1.0 released 2026-10-29 from the operator's machine (the one bootstrap); 0.1.1 to 0.9.0 through the workflow the same day | 0.5.0 refuses a refresh that downgrades or removes third-party packages; 0.6.0 adds npm provenance, tag fetching before checks, the local hook form; 0.7.0 installs pnpm from `packageManager`, ignores untracked files in preflight, adds `ship --version`; 0.8.0 adds `pnpm-root`, `before-build` and `build = false` for `pdum_rfb`; 0.9.0 folds the last three migrations' feedback, fixes the marker-as-pin bug, reports caps, lets a dry run plan on a dirty tree |
 | `pdum_aws` | local `release.sh` + `hatch publish`, `-alpha` marker | **done**: 0.6.1 released 2026-10-29 through the workflow, tag `habemus-papadum-aws-v0.6.1`, manifest `0.6.1+dev` | CI test fixed (console width) on the way |
-| `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | **done**: migrated 2026-10-29 (commit `14881d6`), nine packages decoupled with baseline tags `<package>-v0.8.0`, every sibling dependency a peer with a floor; dry run green | first per-package release pending |
-| `pdum_aiui` | `versioning.mjs`, coupled, canary mode, gallery deploy in `release.yml`, `v0.24.0` | **done** 2026-10-29 by an agent from the `ship-adopt` skill (e7115456): fourteen public packages decoupled with baseline tags `<unscoped>-v0.24.0`, peer audit applied, canary mode removed, gallery deploy moved to `gallery.yml` on push to `main`, `ship-check` in the existing `.githooks/pre-commit`; CI, gallery and dry run green | three agent worktrees carry manifest edits in the old `workspace:^` shape and will need the floor form on merge; the cf_browser_credentials kit stays a regular dependency of `aiui-cf-creds` (peer promotion is an operator call) |
+| `cf_browser_credentials` | `versioning.mjs`, coupled, `v0.8.0` | **done**: migrated 2026-10-29 (commit `14881d6`), nine packages decoupled with baseline tags `<package>-v0.8.0`, every sibling dependency a peer with a floor; dry run green | all nine packages released independently at 0.8.1; the seven remaining patch releases completed after the workflow fixes below |
+| `pdum_aiui` | `versioning.mjs`, coupled, canary mode, gallery deploy in `release.yml`, `v0.24.0` | **done** 2026-10-29 by an agent from the `ship-adopt` skill (e7115456): fourteen public packages decoupled with baseline tags `<unscoped>-v0.24.0`, peer audit applied, canary mode removed, gallery deploy moved to `gallery.yml` on push to `main`, `ship-check` in the existing `.githooks/pre-commit`; CI, gallery and dry run green | all fourteen packages subsequently published independently at 0.24.1 with npm provenance; three agent worktrees carry manifest edits in the old `workspace:^` shape and will need the floor form on merge; the cf_browser_credentials kit stays a regular dependency of `aiui-cf-creds` (peer promotion is an operator call) |
 | `pdum_rfb` | `_versioning.py`, coupled, nested pnpm workspace, platform wheels, `v0.3.0` | **done** 2026-10-29 by an agent from the `ship-adopt` skill (71ce3ba): seven packages decoupled with baseline tags on the `v0.3.0` commit; `pnpm-root = "widgets"`, `before-build` for the rfb wheel's JavaScript, `build = false` for nvenc and vtenc, whose wheel workflows gained a tag trigger and a publish job; the release caller dispatches them after a real release; CI and dry run green | the dispatch job and the wheel publish jobs run only on a real nvenc or vtenc release, so they are unexercised; `~=` member dependencies became floors |
 | `pdum_dsl` | `_versioning.py`, coupled, no tags | skipped (operator decision 2026-10-29) | |
 | `pdum_agent_tools` | inline `uv version`, coupled, `v0.1.0` covering three of six members | **done** 2026-10-29 by an agent from the `ship-adopt` skill (c403d07): baseline tags for mitm, codex-launcher and hostfork; claude-launcher, agent-history and orchestrator at `0.0.0+dev` with no tag; three CI repairs followed (e45f0eb, 748d924, 2891837); CI green and dry run green (`skip_ci_check` while CI was red) | `typescript/` is a nested pnpm workspace with nothing on npm, outside ship; the Hostfork workflow is a manual check before a hostfork release |
@@ -81,8 +81,23 @@ receive both fixes without a CLI upgrade or permission changes. The gate
 compares manifests and local `uv.lock` versions; it requires fresh CI for
 source, dependency or configuration changes. Regression coverage exercises
 the workflow itself, including failed/pending CI and publishing command
-failures. The gate also passed against CF's actual post-release history;
-hosted workflow verification is pending.
+failures. All 64 tests and the hosted CI passed. A
+[CF dry run](https://github.com/habemus-papadum/cf_browser_credentials/actions/runs/40967134841)
+reused its pre-release green CI with the gate enabled; an
+[intentionally invalid dry run](https://github.com/habemus-papadum/pdum_ship/actions/runs/40967138401)
+reported failure through the summary pipeline. The fixes landed in `7322b82`.
+
+Seven CF patch releases then completed with the gate and release tests enabled:
+worker, elevenlabs, mosaic, motherduck, openai, zarr and loopback-cors. The
+[last release](https://github.com/habemus-papadum/cf_browser_credentials/actions/runs/40968296406)
+finished the sequence. Release jobs took 33–41 seconds each, 4 minutes
+11 seconds in total; the seven dry-run jobs added 2 minutes 13 seconds. From
+first publish dispatch to final completion the sequence took 9 minutes
+2 seconds, including intermediate dry runs, queues and polling. Public npm
+visibility lagged the upload; all nine packages were then verified on npm
+at `0.8.1`, with provenance on all seven new releases.
+All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
+`ship deps check` passes in the updated CF checkout.
 
 ## Open items
 
