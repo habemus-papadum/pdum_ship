@@ -129,7 +129,7 @@ def release_cmd(
         except packages_mod.PackageError as exc:
             fail(str(exc))
 
-    problems = release.preflight(repo, cfg, pkgs, check_remote=not no_push and not dry_run)
+    problems = release.preflight(repo, cfg, pkgs, check_remote=not no_push and not dry_run, allow_dirty=dry_run)
     if problems:
         for problem in problems:
             say(f"✗ {problem}")

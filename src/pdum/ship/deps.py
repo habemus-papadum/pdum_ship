@@ -302,18 +302,21 @@ def pin_problems(config: Config, packages: list[Package]) -> list[str]:
         data = tomllib.loads(text)
         rel = manifest.relative_to(config.root)
         for req in _python_requirements(data):
-            match = _REQ_RE.match(req)
+            # The environment marker after ";" may contain "==" (sys_platform == 'linux').
+            match = _REQ_RE.match(req.split(";", 1)[0])
             if not match or not config.is_ours(match.group("name")):
                 continue
             spec = match.group("spec")
             name = match.group("name")
-            if "==" in spec:
+            narrow = "==" in spec or "~=" in spec
+            if narrow:
                 line = next((ln for ln in text.splitlines() if req in ln), "")
                 commented = "#" in line.split(req, 1)[-1] if line else False
                 if not commented and name not in config.pins:
+                    what = "pins" if "==" in spec else "caps (~=)"
                     problems.append(
-                        f"{rel}: {req!r} pins one of our packages without a reason "
-                        f"(add a comment on that line or [tool.ship.pins])"
+                        f"{rel}: {req!r} {what} one of our packages without a reason "
+                        f"(add a comment on that line or [tool.ship.pins]); the policy is a floor"
                     )
     for manifest in _npm_manifests(config, packages):
         data = json.loads(manifest.read_text())
@@ -322,10 +325,16 @@ def pin_problems(config: Config, packages: list[Package]) -> list[str]:
             for name, spec in (data.get(section) or {}).items():
                 if not config.is_ours(name) or not isinstance(spec, str):
                     continue
-                if re.match(r"^\d", spec) and name not in config.pins:
+                range_part = spec.removeprefix("workspace:")
+                if re.match(r"^\d", range_part) and name not in config.pins:
                     problems.append(
                         f"{rel}: {section} {name} = {spec!r} pins one of our packages "
                         f"without a reason in [tool.ship.pins]"
+                    )
+                elif range_part.startswith(("^", "~")) and name not in config.pins:
+                    problems.append(
+                        f"{rel}: {section} {name} = {spec!r} is narrow; the policy is a floor "
+                        f"('>=X.Y.0' or 'workspace:>=X.Y.0'), or give a reason in [tool.ship.pins]"
                     )
     return problems
 

@@ -107,9 +107,12 @@ def commits_since_release(repo: Repo, config: Config, package: Package) -> list[
 # -- preflight -------------------------------------------------------------------
 
 
-def preflight(repo: Repo, config: Config, packages: list[Package], *, check_remote: bool) -> list[str]:
+def preflight(
+    repo: Repo, config: Config, packages: list[Package], *, check_remote: bool, allow_dirty: bool = False
+) -> list[str]:
+    """``allow_dirty`` is for a dry run: it writes nothing, so uncommitted changes do not matter."""
     problems: list[str] = []
-    if not repo.is_clean():
+    if not allow_dirty and not repo.is_clean():
         problems.append("the working tree has uncommitted changes:\n" + repo.status_porcelain())
     branch = repo.current_branch()
     if branch != config.branch:

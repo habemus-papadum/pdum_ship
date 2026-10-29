@@ -121,6 +121,8 @@ def test_preflight_catches_dirty_tree_and_wrong_branch(single_repo):
     gitignore.write_text(original + "scratch/\n")
     problems = release.preflight(repo, cfg, pkgs, check_remote=False)
     assert any("uncommitted" in p for p in problems)
+    # A dry run writes nothing, so it may plan on a dirty tree.
+    assert not any("uncommitted" in p for p in release.preflight(repo, cfg, pkgs, check_remote=False, allow_dirty=True))
     gitignore.write_text(original)
     single_repo.git("checkout", "-q", "-b", "feature")
     problems = release.preflight(repo, cfg, pkgs, check_remote=False)

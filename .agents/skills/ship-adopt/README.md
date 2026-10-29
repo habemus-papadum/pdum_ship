@@ -23,11 +23,14 @@ uv run ship deps check
   manifest says `0.4.0+dev` until the next release. The suffix is valid in both
   ecosystems (a PEP 440 local version; semver build metadata). PyPI refuses to
   accept it, and `ship` refuses to publish it anywhere, so a development build
-  cannot be published by accident.
+  cannot be published by accident. npm would accept it: `pnpm pack` and
+  `pnpm publish` strip `+dev` and produce a plain `0.4.0`, so the guard on
+  the npm side is ship's alone.
 - **Floors on our own packages.** A consumer declares one of our packages
   with a lower bound (`my-lib>=0.4`, `"@scope/lib": ">=0.4.0"`), never an
-  exact version. The lockfile holds the exact version; `ship deps refresh`
-  moves it.
+  exact version and never a cap (`~=0.4.0`, `^0.4.0`, `~0.4.0`), which
+  blocks the next minor of a 0.x package for no reason the consumer knows.
+  The lockfile holds the exact version; `ship deps refresh` moves it.
 - **Lockfiles change only on command.** `uv run`, `uv sync` and `pnpm install`
   keep locked versions. `ship deps refresh` is the one command that upgrades.
 - **An exact pin needs a reason.** A pin on one of our packages is allowed

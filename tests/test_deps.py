@@ -69,6 +69,37 @@ def test_pin_without_reason_is_reported_and_reason_clears_it(single_repo):
     assert deps.pin_problems(cfg, pkgs) == []
 
 
+def test_marker_equals_is_not_a_pin_and_compatible_release_is_a_cap(single_repo):
+    pyproject = single_repo.root / "pyproject.toml"
+    base = pyproject.read_text()
+    pyproject.write_text(
+        base.replace(
+            "dependencies = []",
+            "dependencies = [\"demo-lib>=1.2 ; sys_platform == 'linux' and platform_machine == 'x86_64'\"]",
+        )
+    )
+    repo, cfg, pkgs = load(single_repo)
+    assert deps.pin_problems(cfg, pkgs) == []
+
+    pyproject.write_text(base.replace("dependencies = []", 'dependencies = ["demo-lib~=1.2.0"]'))
+    repo, cfg, pkgs = load(single_repo)
+    problems = deps.pin_problems(cfg, pkgs)
+    assert len(problems) == 1 and "caps (~=)" in problems[0]
+
+
+def test_caret_on_our_npm_package_is_narrow(single_repo):
+    import json
+
+    manifest = single_repo.root / "package.json"
+    manifest.write_text(json.dumps({"name": "demo-root", "private": True, "dependencies": {"@demo/lib": "^0.8.0"}}))
+    repo, cfg, pkgs = load(single_repo)
+    problems = deps.pin_problems(cfg, pkgs)
+    assert len(problems) == 1 and "is narrow" in problems[0]
+    manifest.write_text(json.dumps({"name": "demo-root", "private": True, "dependencies": {"@demo/lib": ">=0.8.0"}}))
+    repo, cfg, pkgs = load(single_repo)
+    assert deps.pin_problems(cfg, pkgs) == []
+
+
 def test_inline_comment_counts_as_a_reason(single_repo):
     pyproject = single_repo.root / "pyproject.toml"
     text = pyproject.read_text().replace(

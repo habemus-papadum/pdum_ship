@@ -25,6 +25,8 @@ root `pyproject.toml` the procedure adds exists to install it.
    `<baseline>+dev`, and floors between siblings start at it.
 3. Check for work in flight on other branches or worktrees. Decoupling a
    lockstep repository edits every manifest and will conflict with it.
+4. Install the newest `habemus-papadum-ship` on PyPI, not the version a
+   brief or an older document names.
 
 ## The procedure
 
