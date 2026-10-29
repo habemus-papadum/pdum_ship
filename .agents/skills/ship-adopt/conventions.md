@@ -98,10 +98,12 @@ one fails.
    __version__ = _dist_version("<distribution>")
    ```
 
-   Let the import sorter place the import. Grep `src/`, `tests/`, `docs/`
-   and the docs configuration for the literal version and for `-alpha`; a
-   test that asserts a non-empty string keeps passing, one that asserts
-   the literal is rewritten.
+   Let the import sorter place the import. Grep `src/`, `tests/`, `docs/`,
+   the docs configuration and every other tree the old release script
+   wrote to (a TypeScript `version.ts`, a `plugin.json`) for the literal
+   version and for `-alpha`; delete each mirror or derive it from the
+   manifest at build time. A test that asserts a non-empty string keeps
+   passing; one that asserts the literal is rewritten.
 5. **Baseline tag.** `git tag -a <package>-v<baseline> -m "<package> <baseline> (baseline for ship; same commit as v<baseline>)" v<baseline>^{commit}`.
    One per package in a workspace. Keep the old tag.
 6. **`release.yml`.** Create the caller below. Change the documentation
@@ -179,7 +181,8 @@ Same prerequisites. The steps parallel the uv ones; where a step says
    README.
 3. **Delete the versioning script** and the root `package.json` scripts
    that called it. Leave the root `version` field (ship ignores a private
-   root) or set it to `0.0.0`. Fix any scaffolder (`new-package` script)
+   root) or set it to `0.0.0`; a private workspace member likewise carries
+   `0.0.0` and no tag. Fix any scaffolder (`new-package` script)
    that wrote the shared version: a new package starts at `0.0.0+dev`.
 4. **Manifests.** Set each publishable package's `version` to
    `<baseline>+dev`. No tool does this for npm; edit the files.
@@ -210,15 +213,25 @@ Same prerequisites. The steps parallel the uv ones; where a step says
    `core-v…`).
 7. **`release.yml`.** Replace the old workflow with the caller below. Set
    `node_version` to match `.nvmrc` or `engines.node` if the repository pins
-   Node; when `.nvmrc` exists the reusable workflow reads it. The
+   Node; when `.nvmrc` exists the reusable workflow reads it. Put
+   `"packageManager": "pnpm@<version>"` in the root `package.json` so the
+   workflow installs that pnpm (otherwise its `pnpm_version` input, default
+   latest, applies), and remove `version:` from any `pnpm/action-setup`
+   step in the repository's own workflows; the action errors when the two
+   disagree. The
    repository's `.npmrc` must hold no token; the workflow has
    `actions/setup-node` write one that reads `NODE_AUTH_TOKEN`. The
    repository secret is `NPM_TOKEN`.
 8. **CI.** Remove any lockstep check; add the CI snippet below.
 9. **Pre-commit hook, skills, agent instructions, README**: steps 7–9 of
    the uv procedure.
-10. **Check.** `pnpm install` (the lockfile updates for the new specifiers),
-    `pnpm install --frozen-lockfile --lockfile-only` (consistent), `pnpm -r
+10. **Check.** Run pnpm non-interactively (`CI=true pnpm install`): a
+    different local pnpm than `packageManager` names may otherwise prompt
+    to recreate `node_modules`, and a newer one may rewrite
+    `pnpm-workspace.yaml` (an `allowBuilds` prompt); confirm that file is
+    unchanged afterwards. Then `pnpm install` (the lockfile updates for the
+    new specifiers), `pnpm install --frozen-lockfile --lockfile-only`
+    (consistent), `pnpm -r
     run build`, typecheck, lint, tests, `uv run ship packages`, `uv run ship
     deps check` (`ok`), `uv run ship changed`.
 11. **Commit and push** the commit and the baseline tags; dry-run the
@@ -306,7 +319,11 @@ A shallow checkout makes every manifest look like it should be
 `0.0.0+dev`. Merge these lines into the repository's existing CI job rather
 than replacing its steps: keep its checkout action version and options such
 as `persist-credentials`, add `fetch-depth: 0` to that step, and add the uv
-setup and the two `run` lines where they fit. CI's `ship deps check` reads
+setup and the two `run` lines where they fit. If CI already installs
+through a setup script that runs `uv sync --frozen`, that install is
+enough (`--frozen` installs the committed lockfile as it is; `--locked`
+additionally asserts it is current, which `ship deps check` also does);
+put `uv run ship deps check` right after the setup step. CI's `ship deps check` reads
 the baseline tags, so the migration commit and its tags must be pushed
 together (step 11) or the first CI run on the commit reports every manifest
 as ahead of its tag.
@@ -339,6 +356,23 @@ repos:
     hooks:
       - id: ship-check
 ```
+
+## A Python package with a build-only pnpm workspace
+
+Some repositories publish one Python distribution and keep a pnpm workspace
+only to build assets that ship inside it (widgets bundled into the wheel).
+Decide first what is published: `npm view <name>` for each `package.json`
+name, and the old release script's publish commands. A workspace member
+that is not published gets `"private": true` and `"version": "0.0.0"`; ship
+ignores private packages, so the repository then follows the uv procedure
+with one addition: the root `package.json` must carry
+`"packageManager": "pnpm@<version>"`, because the reusable workflow sets up
+pnpm whenever a `package.json` exists and takes the version from that field
+(or from its `pnpm_version` input, which defaults to the latest). Remove
+`version:` from any existing `pnpm/action-setup` step in the repository's
+own workflows, which errors when the two disagree. A version literal the
+old script mirrored into TypeScript (`src/version.ts`) is deleted with the
+script.
 
 ## Adding a package
 

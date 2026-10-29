@@ -46,7 +46,8 @@ ours = ["@scope/*", "my-org-*"]
 
 # Paths outside a package directory whose changes count as a change to every
 # package (for `ship changed`). Lockfiles are not listed: every refresh and
-# every release touches them.
+# every release touches them. For a package at the repository root the
+# whole tree is already its directory, so this setting adds nothing there.
 shared-paths = [".github/workflows/**", "pnpm-workspace.yaml"]
 
 # Paths whose changes never count. Optional.

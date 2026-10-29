@@ -43,6 +43,10 @@ on:
         description: Node version to install when the repository has a pnpm workspace
         type: string
         default: "22"
+      pnpm_version:
+        description: pnpm version to install when package.json pins none in packageManager
+        type: string
+        default: "latest"
   workflow_call:
     inputs:
       package:
@@ -77,6 +81,10 @@ on:
         description: Node version to install when the repository has a pnpm workspace
         type: string
         default: "22"
+      pnpm_version:
+        description: pnpm version to install when package.json pins none in packageManager
+        type: string
+        default: "latest"
     secrets:
       PYPI_API_TOKEN:
         required: false
@@ -121,9 +129,20 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
+          # pnpm/action-setup needs a version: from package.json's packageManager when the
+          # repository pins one, otherwise from the pnpm_version input.
+          if [ -f package.json ] && grep -q '"packageManager"' package.json; then
+            echo "pinned=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pinned=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: pnpm/action-setup@v4
-        if: steps.pnpm.outputs.present == 'true'
+        if: steps.pnpm.outputs.present == 'true' && steps.pnpm.outputs.pinned == 'true'
+      - uses: pnpm/action-setup@v4
+        if: steps.pnpm.outputs.present == 'true' && steps.pnpm.outputs.pinned == 'false'
+        with:
+          version: ${{ inputs.pnpm_version }}
       # A repository that pins Node in .nvmrc gets that version; otherwise the input.
       # setup-node writes an .npmrc that reads the publish token from NODE_AUTH_TOKEN.
       - uses: actions/setup-node@v5

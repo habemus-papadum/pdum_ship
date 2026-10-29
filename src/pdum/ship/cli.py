@@ -27,6 +27,21 @@ skills_app = typer.Typer(no_args_is_help=True, help="Write ship's agent skills i
 app.add_typer(skills_app, name="skills")
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version_flag: Annotated[
+        bool, typer.Option("--version", help="Print ship's version and exit", callback=_print_version, is_eager=True)
+    ] = False,
+) -> None:
+    """Release packages and refresh dependencies. One version per package; the tag is the truth."""
+
+
 def say(message: str) -> None:
     typer.echo(message)
 

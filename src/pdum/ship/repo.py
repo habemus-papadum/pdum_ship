@@ -39,7 +39,9 @@ class Repo:
     # -- state -----------------------------------------------------------------
 
     def status_porcelain(self) -> str:
-        return self.git("status", "--porcelain").strip()
+        """Tracked changes only. Untracked files (a stray .DS_Store, a scratch notebook)
+        cannot reach a release commit, which stages explicit paths, so they do not block one."""
+        return self.git("status", "--porcelain", "--untracked-files=no").strip()
 
     def is_clean(self) -> bool:
         return self.status_porcelain() == ""

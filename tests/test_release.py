@@ -111,10 +111,17 @@ def test_failing_tests_revert_the_version(single_repo):
 
 def test_preflight_catches_dirty_tree_and_wrong_branch(single_repo):
     repo, cfg, pkgs = load(single_repo)
+    # An untracked file cannot reach a release commit, so it does not block one.
     single_repo.write("scratch.txt", "x")
+    assert not any("uncommitted" in p for p in release.preflight(repo, cfg, pkgs, check_remote=False))
+    (single_repo.root / "scratch.txt").unlink()
+    # A modified tracked file does.
+    gitignore = single_repo.root / ".gitignore"
+    original = gitignore.read_text()
+    gitignore.write_text(original + "scratch/\n")
     problems = release.preflight(repo, cfg, pkgs, check_remote=False)
     assert any("uncommitted" in p for p in problems)
-    (single_repo.root / "scratch.txt").unlink()
+    gitignore.write_text(original)
     single_repo.git("checkout", "-q", "-b", "feature")
     problems = release.preflight(repo, cfg, pkgs, check_remote=False)
     assert any("branch 'feature'" in p for p in problems)
