@@ -120,6 +120,7 @@ def preflight(repo: Repo, config: Config, packages: list[Package], *, check_remo
         else:
             try:
                 repo.fetch(config.remote, config.branch)
+                repo.fetch_tags(config.remote)
             except GitError as exc:
                 problems.append(str(exc))
             else:

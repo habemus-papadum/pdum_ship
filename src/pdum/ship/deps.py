@@ -369,6 +369,8 @@ def check(repo: Repo, config: Config, packages: list[Package], *, hook: bool) ->
         return problems
     problems += pin_problems(config, packages)
     problems += peer_problems(config, packages)
+    # Tags made by a release elsewhere do not arrive with `git pull`; the marker check needs them.
+    repo.fetch_tags(config.remote)
     problems += marker_problems(repo, config, packages)
     if config.coupled is not None and not config.coupled.strip():
         problems.append("[tool.ship] coupled must give the reason, not an empty string")

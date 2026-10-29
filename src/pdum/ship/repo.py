@@ -94,6 +94,19 @@ class Repo:
     def fetch(self, remote: str, branch: str) -> None:
         self.git("fetch", "--quiet", remote, branch)
 
+    def fetch_tags(self, remote: str) -> bool:
+        """Fetch the remote's tags; False when the remote is missing or unreachable.
+
+        A plain ``git pull`` does not bring in a tag made by a release elsewhere, and the
+        version-marker check reads tags, so the commands that need them fetch first.
+        """
+        if not self.has_remote(remote):
+            return False
+        proc = subprocess.run(
+            ["git", "fetch", "--quiet", "--tags", remote], cwd=self.root, capture_output=True, text=True
+        )
+        return proc.returncode == 0
+
     def push_atomic(self, remote: str, branch: str, tag: str | None) -> None:
         refs = [f"HEAD:refs/heads/{branch}"]
         if tag:

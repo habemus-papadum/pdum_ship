@@ -117,6 +117,19 @@ def test_pnpm_lock_key_parsing():
     assert m.group("name") == "vite" and m.group("version") == "8.3.3"
 
 
+def test_check_fetches_tags_made_elsewhere(single_repo):
+    """A release tag that only origin has (after a plain `git pull`) is fetched before the marker check."""
+    from pdum.ship import release
+
+    repo, cfg, pkgs = load(single_repo)
+    plan = release.plan(repo, cfg, pkgs, selected=pkgs[0], bump="minor", version=None, registry_check=False)
+    release.execute(repo, cfg, plan, publish=False, push=True, run_tests=False, say=lambda _: None)
+    single_repo.git("tag", "-d", "demo-pkg-v0.1.0")
+    assert "demo-pkg-v0.1.0" not in single_repo.git("tag")
+    assert deps.check(repo, cfg, pkgs, hook=False) == []
+    assert "demo-pkg-v0.1.0" in single_repo.git("tag")
+
+
 def test_moved_kind_spots_downgrades_and_removals():
     assert deps.Moved("a", None, "1.0.0").kind == "added"
     assert deps.Moved("a", "1.0.0", None).kind == "removed"

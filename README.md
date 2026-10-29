@@ -94,7 +94,9 @@ component is the unscoped name (`@scope/core` tags as `core-v1.2.0`).
 In order:
 
 1. Preflight: clean working tree, on the release branch, `HEAD` equal to the
-   remote branch, no development links, lockfiles current.
+   remote branch, no development links, lockfiles current. Tags are fetched
+   from the remote first (as `ship deps check` also does): a release made
+   elsewhere leaves a tag that `git pull` does not bring in.
 2. Read the package's last tag; require the manifest to say
    `<last>+dev`; compute the next version; ask the registry that it does not
    exist yet (`--no-registry-check` skips the question).
