@@ -52,6 +52,11 @@ shared-paths = [".github/workflows/**", "pnpm-workspace.yaml"]
 # Paths whose changes never count. Optional.
 ignore-paths = ["docs/**"]
 
+# Commit subjects (prefixes) that never count as a change, in addition to
+# ship's own "back to development:" commits. Useful after adopting ship in a
+# repository whose old pipeline left a post-release commit. Optional.
+ignore-subjects = ["back to dev"]
+
 # Release from this branch to this remote. Defaults shown.
 branch = "main"
 remote = "origin"
@@ -127,6 +132,8 @@ touches the package's directory (minus `ignore-paths`) or one of the
 `shared-paths`. A package with no tag counts as changed. A package is not
 marked changed because a workspace dependency of it changed: consumers hold
 floors, so republishing a dependent that did not change adds nothing.
+ship's own `back to development:` commits never count, nor do commits whose
+subject starts with an entry of `ignore-subjects`.
 
 ### `ship packages`
 
@@ -198,7 +205,11 @@ jobs:
 The workflow waits for the `ci.yml` run on the same commit to succeed (input
 `ci_workflow` renames it; `skip_ci_check` overrides it), sets the git identity,
 installs the repository with `uv sync --locked`, exports the tokens, and runs
-`uv run ship release`. Publishing authenticates with the tokens; switching a
+`uv run ship release`. For a pnpm workspace it installs pnpm and Node — the
+version in `.nvmrc` when the repository has one, otherwise the
+`node_version` input — and lets `actions/setup-node` write the `.npmrc` that
+reads `NODE_AUTH_TOKEN`. The full caller, with the `skip_ci_check` and
+`skip_tests` inputs, is in [`docs/conventions.md`](conventions.md#the-release-workflow-caller). Publishing authenticates with the tokens; switching a
 repository to trusted publishing changes only that step.
 
 ## Why peer dependencies matter for npm libraries

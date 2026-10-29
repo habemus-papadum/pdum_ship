@@ -92,8 +92,9 @@ def _commits_touching(repo: Repo, config: Config, package: Package, since: str |
     ship's own restore commit touches the manifest and the lockfile after every release;
     it is recognised by its subject and left out.
     """
+    prefixes = (RESTORE_SUBJECT, *config.ignore_subjects)
     lines = repo.commits_since(since, pathspecs(config, package))
-    return [line for line in lines if not line.split(" ", 1)[-1].startswith(RESTORE_SUBJECT)]
+    return [line for line in lines if not line.split(" ", 1)[-1].startswith(prefixes)]
 
 
 def commits_since_release(repo: Repo, config: Config, package: Package) -> list[str]:

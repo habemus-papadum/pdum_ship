@@ -207,3 +207,20 @@ def test_pnpm_package_release_builds_tags_and_restores(pnpm_repo):
     assert manifest["peerDependencies"] == {"@demo/core": "workspace:>=0.0.0"}
     tagged = repo.tag_commit("plugin-v0.1.0")
     assert '"version": "0.1.0"' in repo.git("show", f"{tagged}:packages/plugin/package.json")
+
+
+def test_ignore_subjects_excludes_an_old_pipelines_commits(single_repo):
+    do_release(single_repo, "demo-pkg", "minor")
+    single_repo.write("README.md", "after release\n")
+    single_repo.commit_all("back to dev (0.1.0+dev)")
+    repo, cfg, pkgs = load(single_repo)
+    assert len(release.commits_since_release(repo, cfg, pkgs[0])) == 1
+
+    pyproject = single_repo.root / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text().replace("[tool.ship]\n", '[tool.ship]\nignore-subjects = ["back to dev"]\n', 1)
+    )
+    repo, cfg, pkgs = load(single_repo)
+    assert cfg.ignore_subjects == ["back to dev"]
+    # The pyproject edit itself is uncommitted; the ignored commit no longer counts.
+    assert release.commits_since_release(repo, cfg, pkgs[0]) == []

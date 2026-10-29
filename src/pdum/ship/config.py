@@ -31,6 +31,7 @@ class Config:
     ours: list[str]
     shared_paths: list[str] = field(default_factory=list)
     ignore_paths: list[str] = field(default_factory=list)
+    ignore_subjects: list[str] = field(default_factory=list)
     coupled: str | None = None
     branch: str = "main"
     remote: str = "origin"
@@ -94,6 +95,7 @@ def load(root: Path) -> Config:
         ours=list(ours),
         shared_paths=list(table.get("shared-paths", [])),
         ignore_paths=list(table.get("ignore-paths", [])),
+        ignore_subjects=list(table.get("ignore-subjects", [])),
         coupled=coupled,
         branch=table.get("branch", "main"),
         remote=table.get("remote", "origin"),

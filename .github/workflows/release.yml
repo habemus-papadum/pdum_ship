@@ -123,12 +123,19 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         if: steps.pnpm.outputs.present == 'true'
+      # A repository that pins Node in .nvmrc gets that version; otherwise the input.
+      # setup-node writes an .npmrc that reads the publish token from NODE_AUTH_TOKEN.
       - uses: actions/setup-node@v5
-        if: steps.pnpm.outputs.present == 'true'
+        if: steps.pnpm.outputs.present == 'true' && hashFiles('.nvmrc') != ''
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - uses: actions/setup-node@v5
+        if: steps.pnpm.outputs.present == 'true' && hashFiles('.nvmrc') == ''
         with:
           node-version: ${{ inputs.node_version }}
           cache: pnpm
-          # Writes an .npmrc that reads the publish token from NODE_AUTH_TOKEN.
           registry-url: https://registry.npmjs.org
 
       - name: Require a successful CI run for this commit

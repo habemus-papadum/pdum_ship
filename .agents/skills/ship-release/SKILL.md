@@ -28,8 +28,10 @@ changes only when a command is asked to change it.
 | Move the lockfile to the newest releases of our packages, then test | `uv run ship deps refresh` |
 | Third-party too, within ranges, behind the release-age gate | `uv run ship deps refresh --all` |
 
-`ship` runs through `uv run` because every repository installs it in its dev
-group. In a pnpm-only repository the root `pyproject.toml` exists for that.
+`ship` runs through `uv run` in every repository, including a pnpm-only
+one: the root `pyproject.toml` exists to install it. An npm package is named
+by its scoped name (`@scope/name`); the unscoped tag component is accepted
+too.
 
 ## Rules an agent follows here
 
@@ -47,13 +49,17 @@ group. In a pnpm-only repository the root `pyproject.toml` exists for that.
   floor in this repository.
 - Never pin one of our packages to an exact version without a reason on the
   same line or in `[tool.ship.pins]`.
-- Never commit a `path` or `editable` entry in `[tool.uv.sources]`, or a
-  `link:`/`file:` dependency in a `package.json`. Use
-  `uv run --with-editable ../other/package …` for a local experiment.
-- In a TypeScript library, a dependency whose objects cross the library's
-  public API or that holds process-wide state is a `peerDependency` with a
-  floor: `>=X.Y.0`, or `workspace:>=X.Y.0` inside the workspace. Never
-  `^0.x`, never `workspace:^`.
+- Never commit a development link: a `path` or `editable` entry in
+  `[tool.uv.sources]`, or a `link:`/`file:` dependency in a `package.json`.
+  For a local experiment in Python use
+  `uv run --with-editable ../other/package …`, which edits nothing. In a
+  pnpm workspace there is no equivalent: `pnpm link` writes `link:` into
+  `package.json` and is itself the leak; work inside the workspace, or
+  publish.
+- In a TypeScript library, a dependency whose objects, exception classes or
+  types cross the library's public API, or that holds process-wide state, is
+  a `peerDependency` with a floor: `>=X.Y.0`, or `workspace:>=X.Y.0` inside
+  the workspace. Never `^0.x`, never `workspace:^`.
 - Run `uv run ship deps check` before finishing.
 
 ## When something is off
@@ -61,6 +67,8 @@ group. In a pnpm-only repository the root `pyproject.toml` exists for that.
 - `ship deps check` says the manifest is not `<tag>+dev`: someone edited the
   version. Set it back (`uv version --package <name> <tag>+dev`, or edit
   `package.json`); do not release around it.
+- `ship deps check` says a skill copy is stale: run `uv run ship skills
+  sync` and commit the result; the installed ship changed.
 - The release workflow stopped at "Require a successful CI run": CI is red
   on that commit. Fix CI; the gate is doing its job.
 - A refresh broke a test: fix the consumer when the fix is clear; otherwise
