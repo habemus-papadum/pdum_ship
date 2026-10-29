@@ -1,0 +1,152 @@
+# Reusable release workflow. A repository calls it from its own release.yml with
+# `uses: habemus-papadum/pdum_ship/.github/workflows/release.yml@main`; see README.md.
+#
+# It runs `ship release` as the repository's CI identity after the commit's CI
+# workflow has succeeded. Publishing authenticates with the tokens passed as
+# secrets; switching to trusted publishing changes only the publish step.
+name: ship release
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Package to release (leave empty in a coupled repository)
+        type: string
+        default: ""
+      bump:
+        description: patch, minor or major, applied to the package's last tag
+        type: string
+        default: minor
+      dry_run:
+        description: Plan and print; write nothing
+        type: boolean
+        default: true
+      skip_tests:
+        description: Do not run the test commands before publishing
+        type: boolean
+        default: false
+      ci_workflow:
+        description: The CI workflow file that must have succeeded for this commit
+        type: string
+        default: ci.yml
+      skip_ci_check:
+        description: Release without waiting for the CI workflow
+        type: boolean
+        default: false
+      uv_version:
+        description: uv version to install
+        type: string
+        default: "0.12.17"
+      node_version:
+        description: Node version to install when the repository has a pnpm workspace
+        type: string
+        default: "22"
+    secrets:
+      PYPI_API_TOKEN:
+        required: false
+      NPM_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ship-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ inputs.uv_version }}
+          enable-cache: true
+
+      - name: Detect a pnpm workspace
+        id: pnpm
+        run: |
+          if [ -f pnpm-workspace.yaml ] || [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.pnpm.outputs.present == 'true'
+      - uses: actions/setup-node@v5
+        if: steps.pnpm.outputs.present == 'true'
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: pnpm
+
+      - name: Require a successful CI run for this commit
+        if: ${{ !inputs.skip_ci_check }}
+        env:
+          SHA: ${{ github.sha }}
+          WORKFLOW: ${{ inputs.ci_workflow }}
+        run: |
+          for attempt in $(seq 1 60); do
+            row=$(gh run list --workflow "$WORKFLOW" --commit "$SHA" --event push --limit 1 \
+              --json status,conclusion --jq '.[0] | select(. != null) | [.status, (.conclusion // "")] | @tsv')
+            IFS=$'\t' read -r status conclusion <<< "$row"
+            if [ "$status" = completed ]; then
+              if [ "$conclusion" = success ]; then exit 0; fi
+              echo "::error::$WORKFLOW concluded '$conclusion' for $SHA."
+              exit 1
+            fi
+            echo "Waiting for $WORKFLOW ($attempt/60)."
+            sleep 30
+          done
+          echo "::error::Timed out waiting for $WORKFLOW."
+          exit 1
+
+      - name: Install the repository
+        run: |
+          uv sync --locked
+          if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; fi
+
+      - name: Check publishing credentials
+        if: ${{ !inputs.dry_run }}
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -f uv.lock ] && [ -z "$PYPI_API_TOKEN" ]; then
+            echo "::warning::PYPI_API_TOKEN is not set; a Python publish will fail."
+          fi
+          if [ -f pnpm-lock.yaml ] && [ -z "$NPM_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN is not set; an npm publish will fail."
+          fi
+
+      - name: Set the git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: ship release
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE: ${{ inputs.package }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          args=(release --bump "$BUMP")
+          if [ -n "$PACKAGE" ]; then args=(release "$PACKAGE" --bump "$BUMP"); fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then args+=(--dry-run); fi
+          if [ "${{ inputs.skip_tests }}" = "true" ]; then args+=(--skip-tests); fi
+          uv run --locked ship "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

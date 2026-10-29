@@ -1,0 +1,7 @@
+- id: ship-check
+  name: ship deps check (development links, lockfiles)
+  description: Rejects a commit with a path/editable uv source, a link:/file: npm dependency, or a stale lockfile.
+  entry: ship deps check --hook
+  language: python
+  pass_filenames: false
+  always_run: true
