@@ -97,7 +97,9 @@ def refresh(
         else:
             ours = sorted(n for n in uv_lock_registry_packages(root) if config.is_ours(n) and n not in workspace_names)
             if ours:
-                args = ["uv", "lock"]
+                # --refresh: a cached index page can be older than the release being
+                # refreshed to; --upgrade-package alone reuses it.
+                args = ["uv", "lock", "--refresh"]
                 for name in ours:
                     args += ["--upgrade-package", name]
                 commands.append(args)
