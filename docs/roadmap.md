@@ -58,7 +58,7 @@ commands.
 | `pdum_rfb` | `_versioning.py`, coupled, `v0.3.0` | not started | |
 | `pdum_dsl` | `_versioning.py`, coupled, no tags | not started | |
 | `pdum_agent_tools` | inline `uv version`, coupled, `v0.1.0` | not started | |
-| `pdum_gcp`, `pdum_plumbum` | as `pdum_aws`, `0.7.0-alpha` vs `v0.6.0` | not started | |
+| `pdum_gcp`, `pdum_plumbum` | as `pdum_aws`, `0.7.0-alpha` vs `v0.6.0` | **done** 2026-10-29 by agents from the `ship-adopt` skill (`pdum_gcp` 074027a, `pdum_plumbum` 8a4d4c0); baseline tags `<package>-v0.6.0`; dry runs green | first releases need `PYPI_API_TOKEN` on each repository |
 | `pdum_coiled` | as `pdum_aws`, `0.1.1-alpha` vs `v0.1.0` | not started | |
 | `pdum-aiui-intent-tool-v0` | tags, `versioning.mjs`, no `release.yml`, root still named `pdum_aiui` | undecided | rename and adopt, or archive |
 

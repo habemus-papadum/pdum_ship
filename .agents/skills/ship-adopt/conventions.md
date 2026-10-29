@@ -47,9 +47,12 @@ everywhere and CI needs one setup step for it.
 
 ## Adopting ship in a uv repository
 
-Prerequisites: a clean working tree on `main`, `HEAD` equal to
-`origin/main`, no other branch or worktree with unmerged changes to the
-manifests. Each step ends with a check; stop when one fails.
+Prerequisites: on `main` with `HEAD` equal to `origin/main`, no other
+branch or worktree with unmerged changes to the manifests, and no
+uncommitted changes to the files the procedure touches. Unrelated
+uncommitted files (a scratch notebook, `.DS_Store`) may stay; stage by
+explicit path and leave them out. Each step ends with a check; stop when
+one fails.
 
 1. **Identify the last release.** The highest existing tag and the version
    it shipped, for example `v0.6.0` for `0.6.0`. Record both; the version
@@ -76,12 +79,22 @@ manifests. Each step ends with a check; stop when one fails.
    so the lockfile is final before the checks. If `uv add` fails saying a
    package that certainly exists "was not found in the package registry",
    an extra index from the machine's user-level uv configuration answered
-   badly; retry, or run with `--no-config`. The lockfile records only the
-   indexes the project declares.
-4. **`__version__`.** Replace any literal with
-   `importlib.metadata.version("<distribution>")`. Grep `src/`, `tests/`,
-   `docs/` and the docs configuration for the literal version and for
-   `-alpha`; fix what asserts or prints it.
+   badly; retry, or run the lock steps with `uv --no-config` (or
+   `UV_NO_CONFIG=1`). Afterwards `grep registry uv.lock | sort -u` must list
+   only the indexes the project declares; a public repository must not lock
+   against a private one.
+4. **`__version__`.** Replace the literal with the installed metadata:
+
+   ```python
+   from importlib.metadata import version as _dist_version
+
+   __version__ = _dist_version("<distribution>")
+   ```
+
+   Let the import sorter place the import. Grep `src/`, `tests/`, `docs/`
+   and the docs configuration for the literal version and for `-alpha`; a
+   test that asserts a non-empty string keeps passing, one that asserts
+   the literal is rewritten.
 5. **Baseline tag.** `git tag -a <package>-v<baseline> -m "<package> <baseline> (baseline for ship; same commit as v<baseline>)" v<baseline>^{commit}`.
    One per package in a workspace. Keep the old tag.
 6. **`release.yml`.** Create the caller below. Change the documentation
@@ -110,12 +123,18 @@ manifests. Each step ends with a check; stop when one fails.
     (manifest `<baseline>+dev`, last tag the baseline), `uv run ship deps
     check` (`ok`), `uv run ship changed`. The first `ship changed` after
     adoption lists the old pipeline's post-release commit ("back to dev",
-    "bump to next version"); it clears at each package's first release, or
-    list that subject under `ignore-subjects` in `[tool.ship]`.
-11. **Commit and push** the commit and the baseline tags. Set the
-    `PYPI_API_TOKEN` repository secret. Run the workflow with
-    `dry_run=true`; it waits for CI on the commit and prints the plan. The
-    operator runs the real release.
+    "Bump to 0.7.0-alpha"). Add that subject's prefix to `ignore-subjects`
+    in `[tool.ship]` (for example `ignore-subjects = ["Bump to", "back to
+    dev"]`) so `ship changed` reports only real changes from the start; the
+    entry is harmless once the package has released.
+11. **Commit and push** the commit and the baseline tags in one push
+    (`git push origin main <tag>…`): CI's `ship deps check` on that commit
+    needs the tags. Stage by explicit path; leave unrelated files in the
+    working tree (an untracked `.DS_Store`, a scratch notebook) alone. Run
+    the workflow with `dry_run=true`; it waits for CI on the commit, which
+    takes a minute or two after a push, then prints the plan. A dry run
+    needs no secret. The `PYPI_API_TOKEN` (or `NPM_TOKEN`) repository secret
+    is needed only for the real release, which the operator runs.
 
 ## Adopting ship in a pnpm workspace
 
@@ -241,8 +260,11 @@ jobs:
       id-token: write   # npm provenance attestations
 ```
 
-A repository with one package may hard-code `package:` and drop the input.
-Keep all three permissions as written: the reusable job requests them, and
+A repository with one package may hard-code `package:` and drop the input;
+its dispatch is then `gh workflow run release.yml -f bump=minor -f dry_run=true`
+with no `package`, and the policy paragraph below is adjusted to match. A
+Python-only repository drops the `NPM_TOKEN` line. Keep all three
+permissions as written: the reusable job requests them, and
 a caller that grants less fails before any step runs, as `startup_failure`
 with no log. `id-token: write` lets `pnpm publish` attach a provenance
 attestation (the repository, commit and workflow run that built the
@@ -267,7 +289,13 @@ ship installed:
 ```
 
 A shallow checkout makes every manifest look like it should be
-`0.0.0+dev`.
+`0.0.0+dev`. Merge these lines into the repository's existing CI job rather
+than replacing its steps: keep its checkout action version and options such
+as `persist-credentials`, add `fetch-depth: 0` to that step, and add the uv
+setup and the two `run` lines where they fit. CI's `ship deps check` reads
+the baseline tags, so the migration commit and its tags must be pushed
+together (step 11) or the first CI run on the commit reports every manifest
+as ahead of its tag.
 
 ## The pre-commit entry
 
