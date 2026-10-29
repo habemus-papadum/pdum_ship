@@ -61,7 +61,10 @@ one fails.
    `pre-release.sh`, a versioning script). Read each first; keep anything
    that is setup rather than release, including a `build.sh` that only syncs
    the environment, and fix the README and docs lines that described it as
-   a release step (`docs/index.md` is sometimes a symlink to the README).
+   a release step (`docs/index.md` is sometimes a symlink to the README). A
+   pre-release checker (lint, tests, clean-tree check) is release-only: CI
+   and `ship release` do that work. Grep the workflows for each deleted
+   script's name before deleting it.
 3. **`pyproject.toml`.** Append:
 
    ```toml
@@ -73,10 +76,14 @@ one fails.
    ```
 
    Then, in this order: `uv add --dev habemus-papadum-ship`; `uv remove
-   --dev hatch` and any interactive release helper; `uv version
+   --dev hatch` and the interactive release helpers (`inquirerpy` is the
+   usual one; grep `src/` and `tests/` for imports before removing anything
+   and keep what the code uses, such as `rich`); `uv version
    <baseline>+dev --no-sync` (`--package <name>` in a workspace, once per
-   member), which rewrites `uv.lock` for the new version; and `uv lock` last
-   so the lockfile is final before the checks. If `uv add` fails saying a
+   member), which rewrites `uv.lock` for the new version and prints the old
+   version in normalized form (`0.7.0a0 => 0.6.0+dev` for `0.7.0-alpha`);
+   and `uv lock` last so the lockfile is final before the checks. The next
+   `uv sync` removes packages that only `hatch` needed; that is expected. If `uv add` fails saying a
    package that certainly exists "was not found in the package registry",
    an extra index from the machine's user-level uv configuration answered
    badly; retry, or run the lock steps with `uv --no-config` (or
@@ -102,9 +109,10 @@ one fails.
    If CI called a deleted script, fix CI; add the CI snippet below.
 7. **Pre-commit hook.** Add the local `ship-check` entry (below) to
    `.pre-commit-config.yaml`, creating the file if the repository had none.
-   `pre-commit` itself is not a dependency of ship: install the hooks with
-   `uvx pre-commit install`, or add `pre-commit` to the dev group and use
-   `uv run pre-commit install`. Say which in the README.
+   `pre-commit` itself is not a dependency of ship: if the repository's
+   setup script already runs `pre-commit install` from the dev group, keep
+   that; otherwise install the hooks with `uvx pre-commit install`. Say
+   which in the README.
 8. **Skills.** `uv run ship skills sync`. It writes `.agents/skills/ship-*`
    and makes `.claude/skills` a symlink to `../.agents/skills` (or writes
    copies if `.claude/skills` is already a directory). Commit the result.
@@ -126,7 +134,9 @@ one fails.
     "Bump to 0.7.0-alpha"). Add that subject's prefix to `ignore-subjects`
     in `[tool.ship]` (for example `ignore-subjects = ["Bump to", "back to
     dev"]`) so `ship changed` reports only real changes from the start; the
-    entry is harmless once the package has released.
+    entry is harmless once the package has released. The migration commit
+    itself counts as a change, so the first dry run reports it under
+    "commits since last release"; that is correct.
 11. **Commit and push** the commit and the baseline tags in one push
     (`git push origin main <tag>…`): CI's `ship deps check` on that commit
     needs the tags. Stage by explicit path; leave unrelated files in the
@@ -134,7 +144,11 @@ one fails.
     the workflow with `dry_run=true`; it waits for CI on the commit, which
     takes a minute or two after a push, then prints the plan. A dry run
     needs no secret. The `PYPI_API_TOKEN` (or `NPM_TOKEN`) repository secret
-    is needed only for the real release, which the operator runs.
+    is needed only for the real release, which the operator runs; check
+    with `gh secret list` and report whether it exists. If the run ends as
+    `startup_failure` with no job log ("likely failed because of a workflow
+    file issue"), the caller grants fewer `permissions` than the reusable
+    job requests; compare the two.
 
 ## Adopting ship in a pnpm workspace
 
