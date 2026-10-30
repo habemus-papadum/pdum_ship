@@ -64,6 +64,7 @@ class PythonRegistry:
     index_url: str
     publish_url: str
     name: str | None = None
+    use_publish_credentials: bool = True
 
 
 def python_target(config: Config) -> PythonRegistry:
@@ -109,7 +110,7 @@ def _credentials(target: PythonRegistry) -> tuple[str, str] | None:
         if not user:
             raise RegistryError("named index password requires its UV_INDEX_<NAME>_USERNAME")
         return user, password
-    if _origin(target.index_url) == _origin(target.publish_url):
+    if target.use_publish_credentials and _origin(target.index_url) == _origin(target.publish_url):
         publish_user, publish_password = os.environ.get("UV_PUBLISH_USERNAME"), os.environ.get("UV_PUBLISH_PASSWORD")
         if publish_user and publish_password:
             return publish_user, publish_password
@@ -152,8 +153,12 @@ def _credentials(target: PythonRegistry) -> tuple[str, str] | None:
 def python_publish_env(config: Config) -> dict[str, str]:
     target = python_target(config)
     env = dict(os.environ)
+    if env.get("UV_PUBLISH_TOKEN") or env.get("UV_PUBLISH_PASSWORD"):
+        return env
     if target.index_url != PYPI_INDEX:
-        credentials = _credentials(target)
+        # Stored HTTP credentials are scoped to the upload origin. A named-index
+        # environment credential explicitly applies to that index's endpoints.
+        credentials = _credentials(PythonRegistry(target.publish_url, target.publish_url, target.name))
         if credentials:
             env.pop("UV_PUBLISH_TOKEN", None)
             env["UV_PUBLISH_USERNAME"], env["UV_PUBLISH_PASSWORD"] = credentials
@@ -297,7 +302,7 @@ def check_timestamps(config: Config) -> list[str]:
                 continue
             checked.add((url, name))
             index = next((i for i in indexes if _url(i["url"]) == _url(url)), {})
-            target = PythonRegistry(_url(url), _url(index.get("publish-url", url)), index.get("name"))
+            target = PythonRegistry(_url(url), _url(index.get("publish-url", url)), index.get("name"), False)
             status, data = python_metadata(target, name)
             problems.extend(
                 timestamp_problems("python", name, data)

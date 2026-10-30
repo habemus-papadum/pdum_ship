@@ -110,7 +110,7 @@ All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
   mappings/publishConfig, with native credentials. `deps check` verifies private
   Python `upload-time` and npm `time` metadata for locked first-party packages.
   The workflow can prepare private credentials without changing package routing.
-  Ninety tests pass, including real clients against a local authenticated
+  Ninety-two tests pass, including real clients against a local authenticated
   registry, failed refresh/publication paths and both release-age gates.
   Source is ready; the new CLI version has not yet been published.
 

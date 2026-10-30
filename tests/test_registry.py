@@ -279,3 +279,38 @@ def test_uv_release_age_cutoff_uses_json_upload_times(single_repo, registry_serv
     from pdum.ship.deps import uv_lock_versions
 
     assert uv_lock_versions(consumer)["demo-pkg"] == frozenset(["0.1.0"])
+
+
+def test_publish_credentials_follow_upload_origin_and_explicit_override(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.uv]\npublish-url="https://upload.example/legacy/"\n[[tool.uv.index]]\nname="private"\nurl="https://read.example/simple/"\npublish-url="https://upload.example/legacy/"\n'
+    )
+    cfg = Config(root=tmp_path, ours=["demo-*"], python_index="private")
+    for key in ("UV_PUBLISH_TOKEN", "UV_PUBLISH_USERNAME", "UV_PUBLISH_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+    targets = []
+
+    def credentials(target):
+        targets.append(target.index_url)
+        return "writer", "write-secret"
+
+    monkeypatch.setattr(registry, "_credentials", credentials)
+    env = registry.python_publish_env(cfg)
+    assert targets == ["https://upload.example/legacy/"] and env["UV_PUBLISH_USERNAME"] == "writer"
+    monkeypatch.setenv("UV_PUBLISH_TOKEN", "explicit-secret")
+    assert registry.python_publish_env(cfg)["UV_PUBLISH_TOKEN"] == "explicit-secret"
+    assert len(targets) == 1
+
+
+def test_dependency_checks_do_not_repurpose_publish_credentials(tmp_path, monkeypatch):
+    (tmp_path / "uv.lock").write_text(
+        '[[package]]\nname="demo-pkg"\nversion="0.1.0"\nsource={registry="https://other.example/simple/"}\n'
+    )
+    cfg = Config(root=tmp_path, ours=["demo-*"])
+
+    def metadata(target, name):
+        assert target.use_publish_credentials is False
+        return 200, simple_metadata()
+
+    monkeypatch.setattr(registry, "python_metadata", metadata)
+    assert registry.check_timestamps(cfg) == []
