@@ -231,6 +231,15 @@ input, is in
 [`docs/conventions.md`](conventions.md#the-release-workflow-caller).
 Copy it from there rather than from another repository.
 
+Repositories with their own native authentication setup can use the composite
+`.github/actions/release` action inside their job instead. Provision uv and any
+Node/pnpm tools, check out full history with push credentials, run the existing
+authentication action, then call ship's action. It reuses the same CI gate,
+locked installation, release command and interrupted-artifact handling as the
+reusable workflow. It neither provisions registry credentials nor replaces the
+caller's native configuration. The caller owns job permissions and release
+concurrency. See the conventions for the caller shape.
+
 The caller must grant `contents: write`, `actions: read` and
 `id-token: write`: the reusable job requests all three, and a caller that
 grants less fails as `startup_failure` with no log. The workflow waits for

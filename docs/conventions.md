@@ -19,8 +19,9 @@ everywhere and CI needs one setup step for it.
   tag series per package: `<package>-v<version>`. Between releases the
   manifest says `<last release>+dev`.
 - A `release.yml` with a `workflow_dispatch` trigger that calls
-  `habemus-papadum/pdum_ship/.github/workflows/release.yml@main`. No other
-  way to publish is documented.
+  `habemus-papadum/pdum_ship/.github/workflows/release.yml@main`, or the shared
+  composite release action after its own authentication setup. Publication
+  stays in the same CLI and shared release steps.
 - Dependencies on the maintainers' own packages declared as floors
   (`name>=X.Y`, `"@scope/name": ">=X.Y.0"`; inside a pnpm workspace,
   `workspace:>=X.Y.0`). `~=X.Y.0`, `^X.Y.0` and `~X.Y.0` are caps, not
@@ -391,6 +392,43 @@ dependency and configuration changes still require fresh CI. Do not add
 `skip_ci_check` to work around ship's release commits. Dispatch packages one
 at a time after the previous run finishes; the input is a single package name.
 See the README's release-workflow section for the exact reuse rule.
+
+## A caller with native authentication setup
+
+A job that uses an existing OIDC/login action must run that action in the same
+job as publication; saved native credentials cannot be carried through a
+reusable-workflow job boundary. Use the shared composite action after setup:
+
+```yaml
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+concurrency:
+  group: ship-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Set up uv and the repository's Node/pnpm versions here, followed by
+      # the existing authentication action. It owns native registry credentials.
+      - uses: habemus-papadum/pdum_ship/.github/actions/release@<full-commit-sha>
+        with:
+          package: ${{ inputs.package }}
+          bump: ${{ inputs.bump }}
+          dry_run: ${{ inputs.dry_run }}
+```
+
+The action also accepts `ci_workflow`, `skip_ci_check` and `skip_tests`, with the
+same defaults as the reusable workflow. It requires uv, and pnpm when the repo
+has a pnpm lockfile. The action reads `[tool.ship] pnpm-root` itself. Do not add
+registry secrets, duplicate the gate or copy the release shell into the caller
+when its native authentication setup already supplies access.
 
 ## The CI snippet
 

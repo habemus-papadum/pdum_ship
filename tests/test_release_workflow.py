@@ -12,14 +12,16 @@ import yaml
 
 WORKFLOW = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/release.yml").read_text())
 JOB = WORKFLOW["jobs"]["release"]
-GATE = next(step for step in JOB["steps"] if step.get("name") == "Require a successful CI run")
-RELEASE = next(step for step in JOB["steps"] if step.get("name") == "ship release")
+ACTION_DIR = Path(__file__).parents[1] / ".github/actions/release"
+ACTION = yaml.safe_load((ACTION_DIR / "action.yml").read_text())
+GATE = (ACTION_DIR / "check_ci.py").read_text()
+RELEASE = next(step for step in ACTION["runs"]["steps"] if step.get("name") == "ship release")
 
 
 @pytest.fixture
 def gate():
     namespace = {"__name__": "workflow_test"}
-    exec(compile(GATE["run"], "release.yml:ci-gate", "exec"), namespace)
+    exec(compile(GATE, "check_ci.py", "exec"), namespace)
     return namespace
 
 

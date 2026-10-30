@@ -1,0 +1,67 @@
+name: Release with ship
+description: Check CI, install locked dependencies, and release using the job's native registry credentials.
+inputs:
+  package:
+    description: Package name (empty only for a coupled repository)
+    default: ""
+  bump:
+    description: patch, minor or major
+    default: minor
+  dry_run:
+    description: Plan and print without publication
+    default: "true"
+  skip_tests:
+    description: Skip the configured release tests
+    default: "false"
+  ci_workflow:
+    description: Workflow whose successful run covers this source
+    default: ci.yml
+  skip_ci_check:
+    description: Explicitly override the CI gate
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Require a successful CI run
+      if: ${{ inputs.skip_ci_check != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        SHA: ${{ github.sha }}
+        BRANCH: ${{ github.ref_name }}
+        WORKFLOW: ${{ inputs.ci_workflow }}
+        SHIP_ACTION_PATH: ${{ github.action_path }}
+      run: python3 "$SHIP_ACTION_PATH/check_ci.py"
+    - name: Install the repository
+      shell: bash
+      run: |
+        root=$(python3 -c 'import tomllib; t = tomllib.load(open("pyproject.toml", "rb")); print(t.get("tool", {}).get("ship", {}).get("pnpm-root", "."))')
+        uv sync --locked
+        if [ -f "$root/pnpm-lock.yaml" ]; then pnpm -C "$root" install --frozen-lockfile; fi
+    - name: Set the git identity
+      shell: bash
+      run: |
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+    - name: ship release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PACKAGE: ${{ inputs.package }}
+        BUMP: ${{ inputs.bump }}
+      run: |
+        args=(release --bump "$BUMP")
+        if [ -n "$PACKAGE" ]; then args=(release "$PACKAGE" --bump "$BUMP"); fi
+        if [ "${{ inputs.dry_run }}" = "true" ]; then args+=(--dry-run); fi
+        if [ "${{ inputs.skip_tests }}" = "true" ]; then args+=(--skip-tests); fi
+        uv run --locked ship "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+    - name: Preserve interrupted release files
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: interrupted-release
+        path: dist/
+        if-no-files-found: ignore
+        retention-days: 7

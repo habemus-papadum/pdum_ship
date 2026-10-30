@@ -204,106 +204,6 @@ jobs:
           cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
           registry-url: ${{ inputs.npm_registry }}
 
-      - name: Require a successful CI run
-        if: ${{ !inputs.skip_ci_check }}
-        env:
-          SHA: ${{ github.sha }}
-          BRANCH: ${{ github.ref_name }}
-          WORKFLOW: ${{ inputs.ci_workflow }}
-        shell: python
-        run: |
-          import json
-          import os
-          from pathlib import PurePosixPath
-          import subprocess
-          import time
-          import tomllib
-
-
-          def git(*args):
-              return subprocess.check_output(["git", *args], text=True).strip()
-
-
-          def normalized(path, text):
-              # Release commits may change only the package's own version, never requirements.
-              if PurePosixPath(path).name == "package.json":
-                  data = json.loads(text)
-                  del data["version"]
-              elif PurePosixPath(path).name == "pyproject.toml":
-                  data = tomllib.loads(text)
-                  del data["project"]["version"]
-              elif path == "uv.lock":
-                  data = tomllib.loads(text)
-                  for package in data.get("package", []):
-                      source = package.get("source", {})
-                      if "editable" in source or "virtual" in source:
-                          package.pop("version", None)
-              else:
-                  raise ValueError("not a release version file")
-              return data
-
-
-          def only_versions(parent, commit):
-              entries = git("diff", "--raw", "--no-renames", "-z", parent, commit).split("\0")
-              for header, path in zip(entries[::2], entries[1::2]):
-                  old_mode, new_mode, _, _, status = header.split()
-                  if old_mode[1:] != new_mode or status != "M":
-                      return False
-                  try:
-                      before = normalized(path, git("show", f"{parent}:{path}"))
-                      after = normalized(path, git("show", f"{commit}:{path}"))
-                  except (ValueError, KeyError, TypeError):
-                      return False
-                  if before != after:
-                      return False
-              return True
-
-
-          def candidates(head):
-              result = [head]
-              while True:
-                  parents = git("rev-list", "--parents", "-n", "1", result[-1]).split()[1:]
-                  if len(parents) != 1 or not only_versions(parents[0], result[-1]):
-                      return result
-                  result.append(parents[0])
-
-
-          def choose_run(commits, runs):
-              # Prefer the nearest commit's latest run, including pending and failed runs.
-              # Never hide a failed current run behind an older successful one.
-              for commit in commits:
-                  for run in runs:
-                      if run["headSha"] == commit and run["event"] in ("push", "workflow_dispatch"):
-                          return run
-              return None
-
-
-          def main():
-              head = os.environ["SHA"]
-              workflow = os.environ["WORKFLOW"]
-              commits = candidates(head)
-              for attempt in range(60):
-                  runs = json.loads(subprocess.check_output([
-                      "gh", "run", "list", "--workflow", workflow,
-                      "--branch", os.environ["BRANCH"], "--limit", "100",
-                      "--json", "headSha,status,conclusion,url,event",
-                  ], text=True))
-                  run = choose_run(commits, runs)
-                  if run and run["status"] == "completed":
-                      if run["conclusion"] != "success":
-                          raise SystemExit(f"::error::{workflow} concluded {run['conclusion']!r}: {run['url']}")
-                      print(f"CI passed for {run['headSha']}: {run['url']}")
-                      if run["headSha"] != head:
-                          print(f"Reusing CI for {head}: only package version metadata changed.")
-                      return
-                  print(f"Waiting for {workflow} ({attempt + 1}/60).", flush=True)
-                  time.sleep(30)
-              raise SystemExit(f"::error::Timed out waiting for {workflow} on {head} or a version-only ancestor.")
-
-
-          if __name__ == "__main__":
-              main()
-
       - name: Configure private registry credentials
         env:
           PYTHON_REGISTRY: ${{ inputs.python_registry }}
@@ -348,13 +248,6 @@ jobs:
               with Path(os.environ["NPM_CONFIG_USERCONFIG"]).open("a") as config:
                   config.write("\n" + key + "=${NPM_BASIC_AUTH}\n")
 
-      - name: Install the repository
-        env:
-          PNPM_ROOT: ${{ steps.pnpm.outputs.root }}
-        run: |
-          uv sync --locked
-          if [ -f "$PNPM_ROOT/pnpm-lock.yaml" ]; then pnpm -C "$PNPM_ROOT" install --frozen-lockfile; fi
-
       - name: Check publishing credentials
         if: ${{ !inputs.dry_run }}
         env:
@@ -369,30 +262,15 @@ jobs:
             echo "::warning::NPM_TOKEN is not set; an npm publish will fail."
           fi
 
-      - name: Set the git identity
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
-      - name: ship release
+      - name: Release with ship
+        uses: habemus-papadum/pdum_ship/.github/actions/release@main
+        with:
+          package: ${{ inputs.package }}
+          bump: ${{ inputs.bump }}
+          dry_run: ${{ inputs.dry_run }}
+          skip_tests: ${{ inputs.skip_tests }}
+          ci_workflow: ${{ inputs.ci_workflow }}
+          skip_ci_check: ${{ inputs.skip_ci_check }}
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PACKAGE: ${{ inputs.package }}
-          BUMP: ${{ inputs.bump }}
-        run: |
-          args=(release --bump "$BUMP")
-          if [ -n "$PACKAGE" ]; then args=(release "$PACKAGE" --bump "$BUMP"); fi
-          if [ "${{ inputs.dry_run }}" = "true" ]; then args+=(--dry-run); fi
-          if [ "${{ inputs.skip_tests }}" = "true" ]; then args+=(--skip-tests); fi
-          uv run --locked ship "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Preserve interrupted release files
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: interrupted-release
-          path: dist/
-          if-no-files-found: ignore
-          retention-days: 7
