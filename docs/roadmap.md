@@ -99,7 +99,7 @@ at `0.8.1`, with provenance on all seven new releases.
 All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
 `ship deps check` passes in the updated CF checkout.
 
-## Open items
+## Private registry release (2026-10-30)
 
 - The pre-adoption hardening now separates all workspace projects from the
   publishable inventory, keeps refreshes confined to lockfiles (including
@@ -110,9 +110,15 @@ All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
   mappings/publishConfig, with native credentials. `deps check` verifies private
   Python `upload-time` and npm `time` metadata for locked first-party packages.
   The workflow can prepare private credentials without changing package routing.
-  Ninety-two tests pass, including real clients against a local authenticated
-  registry, failed refresh/publication paths and both release-age gates.
-  Source is ready; the new CLI version has not yet been published.
+  Version 0.10.0 is published on PyPI and tagged; all 94 tests passed in the
+  [release run](https://github.com/habemus-papadum/pdum_ship/actions/runs/41030033466).
+  A fresh install of that release verified live private Python and npm dates.
+  The first attempt stopped before uploading: its Python-only runner lacked
+  pnpm and tests inherited publish credentials. The runner now installs the
+  test tools, tests isolate native credentials, and empty optional credential
+  variables are removed before uv publication.
+
+## Open items
 
 - `ship-check` at tag `habemus-papadum-ship-v0.1.0` has an invalid manifest
   (fixed in `main`; released as 0.1.1). Repositories reference 0.1.1 or later.
