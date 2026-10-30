@@ -383,7 +383,8 @@ attestation (the repository, commit and workflow run that built the
 package, shown on npmjs.com); publishing still authenticates with the
 token. A Python-only repository grants it too and simply does not use it.
 The reusable workflow also takes `ci_workflow` (default `ci.yml`) and
-`uv_version`.
+`uv_version`. Private registry credential inputs and native registry selection
+are documented in the README’s **Private registries** section.
 
 Consecutive releases reuse green CI across version-only commits; source,
 dependency and configuration changes still require fresh CI. Do not add

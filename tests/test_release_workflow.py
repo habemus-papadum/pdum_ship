@@ -189,3 +189,20 @@ def test_ship_failure_survives_summary_pipeline(tmp_path):
     )
     assert proc.returncode == 23, proc.stdout + proc.stderr
     assert "publish failed" in summary.read_text()
+
+
+def test_private_auth_setup_preserves_scope_routing_and_keeps_secrets_in_env(tmp_path, monkeypatch):
+    step = next(s for s in JOB["steps"] if s.get("name") == "Configure private registry credentials")
+    config = tmp_path / "npmrc"
+    config.write_text("registry=https://packages.example/npm/\n//packages.example/npm/:_authToken=${NODE_AUTH_TOKEN}\n")
+    for key in ("UV_PUBLISH_USERNAME", "UV_PUBLISH_PASSWORD", "NODE_AUTH_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("NPM_REGISTRY", "https://packages.example/npm/")
+    monkeypatch.setenv("NPM_CONFIG_USERCONFIG", str(config))
+    monkeypatch.setenv("NPM_BASIC_AUTH", "synthetic-secret-value")
+    monkeypatch.setenv("PYTHON_REGISTRY", "")
+    exec(compile(step["run"], "release.yml:private-auth", "exec"), {"__name__": "workflow_test"})
+    text = config.read_text()
+    assert "registry=" not in text
+    assert "//packages.example/npm/:_auth=${NPM_BASIC_AUTH}" in text
+    assert "synthetic-secret-value" not in text

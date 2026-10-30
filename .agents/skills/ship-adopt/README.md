@@ -97,7 +97,7 @@ before-build = ["pnpm -C widgets build:anywidget"]
 build = true
 ```
 
-`ship` discovers packages itself: the root `pyproject.toml` and every
+`ship` inventories every workspace project, including private applications, for dependency checks and refresh tests. Its release inventory selects only publishable packages: the root `pyproject.toml` and every
 `[tool.uv.workspace]` member that has a `[project]` table and is not
 `package = false`; the `package.json` of the pnpm workspace root (the
 repository root, or `pnpm-root`) and every `pnpm-workspace.yaml` member that
@@ -122,13 +122,13 @@ In order:
 4. Build. First the package's `before-build` commands, if any. Python:
    `uv build --package`, refusing any built file that still carries a
    development version. npm: the package's `build` script and those of its
-   workspace dependencies (`pnpm --filter "<name>..." run build`), so
-   `pnpm publish` packs fresh output. A package with `build = false` is
+   workspace dependencies (`pnpm --filter "<name>..." run build`), then packs the selected package into `dist/<package>/`. Its packed name and
+   version are checked, and publication uses that exact tarball. A package with `build = false` is
    neither built nor published here; its own workflow does both from the tag.
 5. Run the test commands.
 6. Publish: `uv publish` with the credentials in the environment
    (`UV_PUBLISH_TOKEN`, or `UV_PUBLISH_USERNAME`/`UV_PUBLISH_PASSWORD`), or
-   `pnpm -r publish --filter <name> --no-git-checks --access public` with the
+   `pnpm publish <prepared-tarball> --no-git-checks` with the
    token your `.npmrc` reads from the environment (the reusable workflow lets
    `actions/setup-node` write that `.npmrc` from `NODE_AUTH_TOKEN`).
 7. Commit the version and lockfile, tag `<package>-v<version>`, push the
@@ -137,9 +137,10 @@ In order:
 9. Write `<version>+dev` back, re-lock, commit, push.
 10. Print the commits since the previous tag that touched the package.
 
-Any failure before publishing is reverted. A failure after publishing is not:
-the registry already has the version, so `ship` prints the remaining commands
-instead. `--dry-run` plans and prints, writing nothing. `--no-publish` and
+Build or test failures restore the version files. Once an upload has been
+attempted, a failure preserves the release versions and artifacts: the registry
+may already contain some files. The error names the phase, confirmed uploads
+and uncertain package; see [Interrupted releases](#interrupted-releases). `--dry-run` plans and prints, writing nothing. `--no-publish` and
 `--no-push` do everything except those steps; `--skip-tests` skips step 5.
 `--version X.Y.Z` sets the exact version instead of a bump.
 
@@ -164,7 +165,8 @@ Lists the discovered packages with their manifest versions and last tags.
 
 Upgrades our packages in the lockfiles to their newest releases:
 `uv lock --upgrade-package <name>` for each of our packages found in
-`uv.lock`, and `pnpm update -r <patterns>` for the scoped patterns in `ours`.
+`uv.lock`, and `pnpm update -r --no-save --lockfile-only <names>` for our
+packages found in the pnpm lockfile. Declared floors and catalogs stay unchanged.
 Then `uv sync --locked`, `pnpm install --frozen-lockfile`, the test commands,
 and a table of what moved. With `--all`, third-party packages move too, within
 their declared ranges and behind the release-age gates. The lockfile is left
@@ -176,7 +178,12 @@ requirement, but cannot lower one, so such a move means the resolver did
 something to look at. ship restores the lockfiles and prints the moves;
 `--allow-downgrades` accepts them (for example when one of our packages added
 an upper bound). Any failure — the lock command, the install, the tests —
-restores the lockfiles and reports the moves that were attempted.
+restores the lockfiles and dependency declarations and reports the moves that
+were attempted. Test selection includes private projects, and an explicit
+repository `test` command runs even when nothing is publishable. A changed
+lockfile always triggers installation and tests, including metadata-only changes;
+the version table retains every version of a dependency and distinguishes the
+two ecosystems.
 
 ### `ship deps check [--hook]`
 
@@ -189,7 +196,10 @@ Reports, and exits 1 on any of:
 - a `peerDependencies` range on one of our packages written as `^`, `~`,
   `*`, `workspace:^`, `workspace:~` or `workspace:*` (write `>=X.Y.0` or
   `workspace:>=X.Y.0`);
-- a manifest version that is not `<last tag>+dev`.
+- a manifest version that is not `<last tag>+dev`;
+- a locked first-party dependency on a private registry whose metadata cannot
+  be read or lacks valid publication times (Python file `upload-time`; npm
+  version `time`). These network checks stay outside `--hook`.
 
 `--hook` runs the first two plus the skill-copy check, fast enough for a
 pre-commit hook. The repository already installs ship through its lockfile,
@@ -253,6 +263,81 @@ version in `.nvmrc` when the repository has one, otherwise the
 reads `NODE_AUTH_TOKEN`; `pnpm publish` runs with `--provenance`. Publishing
 authenticates with the tokens; switching a repository to trusted publishing
 changes only that step.
+
+## Private registries
+
+Registry selection and credentials follow the native package managers. A release
+checks the same registry it will publish to. An authentication failure or unreadable
+response is an unknown result, never proof that a version is absent.
+
+Python defaults to public PyPI. To publish privately, reference a uv index:
+
+```toml
+[tool.ship]
+ours = ["example-*", "@example/*"]
+python-index = "internal"
+
+[[tool.uv.index]]
+name = "internal"
+url = "https://packages.example/simple/"
+publish-url = "https://packages.example/legacy/"
+```
+
+An existing `[tool.uv] publish-url` also works when it identifies exactly one
+index by its `publish-url` or origin. `uv.toml` takes precedence over `[tool.uv]`.
+`UV_PUBLISH_INDEX` and `UV_PUBLISH_URL` supply native environment overrides.
+`[tool.ship] index-url` is an alternative when the read endpoint cannot be
+inferred; the upload endpoint must still be configured. Ambiguous private
+configuration fails rather than checking or uploading to public PyPI.
+
+Metadata reads use the JSON Simple API. Credentials come from
+`UV_INDEX_<NAME>_USERNAME` / `UV_INDEX_<NAME>_PASSWORD`, the matching publication
+environment, `.netrc`, or uv's saved credentials. A username supplied through the
+named-index environment also supports uv's native keyring lookup. Credentials
+stay in memory or native stores, are never added to registry URLs or printed,
+and are not forwarded through redirects. No login or token refresh is performed.
+
+npm uses the package's `publishConfig.registry`, then the scope/default registry
+from pnpm's native configuration. Metadata queries use `pnpm view`; publication
+uses `pnpm publish` on the checked tarball with the same explicit registry.
+Basic and Bearer credentials use the native user `.npmrc`, including environment
+substitution through `NPM_CONFIG_USERCONFIG`. pnpm 11 intentionally refuses
+secret environment expansion in a project `.npmrc`; keep only registry mappings
+there. Provenance and public access are requested for the public npm registry;
+private registries receive neither a forced access setting nor an unsupported
+provenance request.
+
+The reusable workflow accepts `npm_registry` for setup-node's credential target,
+`NPM_TOKEN` or `NPM_BASIC_AUTH` (base64 `username:password`, mutually exclusive),
+and `python_registry` with `PYTHON_USERNAME` / `PYTHON_PASSWORD`. The latter
+installs native uv credentials before the repository is synced. Native project
+configuration still selects upload destinations; these inputs prepare credentials.
+A custom workflow can instead use its existing native credential setup and call
+the same CLI. No organization-specific login code belongs in ship.
+
+## Interrupted releases
+
+An upload can succeed remotely before its command reports a failure. Ship keeps
+prepared artifacts and records the source commit, phase, completed uploads and
+uncertain package in `dist/ship-recovery/release.json`, with the manifest/lockfile
+diff in `release.patch`. GitHub retains `dist/` as `interrupted-release` for seven
+days on a failed job. A first-upload failure is also treated as uncertain.
+
+For an interrupted CI release, download that artifact before the retention ends:
+`gh run download RUN_ID -n interrupted-release -D dist`. Inspect the recorded
+phase and the remote tags before taking another action:
+
+| Failed phase | Finish |
+| --- | --- |
+| Publication | Check the configured registry for each prepared version/file. Use the original built artifacts to upload only missing files. If none reached the registry, restoring the source version files is safe. Otherwise retain the release versions. |
+| Release commit/tags or push | Finish the version commit and any missing `<package>-v<version>` tags. Push the commit and tags atomically with `git push --atomic origin HEAD:refs/heads/main refs/tags/TAG...`, using the configured branch/remote. A moved remote branch needs an operator decision; do not force-push. |
+| Development restore/push | The release tags are already pushed. Restore each manifest to its recorded version plus `+dev`, update the Python lock with `uv version --package NAME VERSION+dev`, and commit/push that restore. For npm use `npm --prefix PACKAGE_DIR pkg set version=VERSION+dev`; its version marker does not change the pnpm lock. |
+
+A clean checkout at `source_commit` plus `git apply dist/ship-recovery/release.patch`
+reconstructs the preserved version files. Completed phases need no repeat.
+These are operator recovery steps; an agent still performs uploads through an
+authorized GitHub runner. A normal release is not a resume command, and a new
+version does not repair a missing tag for an already published version.
 
 ## Why peer dependencies matter for npm libraries
 

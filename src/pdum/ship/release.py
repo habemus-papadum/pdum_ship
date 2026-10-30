@@ -18,16 +18,19 @@ recovery instructions instead.
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import shutil
 import subprocess
+import tarfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import deps, registry
 from .config import Config
-from .packages import Package, lockfile_for, read_version, write_version
+from .packages import Package, PackageError, lockfile_for, read_version, write_version
 from .repo import GitError, Repo
 from .versions import ZERO, Bump, Version, VersionError, split_dev
 
@@ -168,7 +171,10 @@ def _plan_one(
     if last is not None and version <= last:
         raise ReleaseError(f"{version} is not after the last release {last} of {package.name}")
     if registry_check:
-        exists = registry.has(package.ecosystem, package.name, str(version))
+        try:
+            exists = registry.has(config, package, str(version))
+        except registry.RegistryError as exc:
+            raise ReleaseError(str(exc)) from exc
         if exists is True:
             raise ReleaseError(
                 f"the registry already has {package.name} {version}; "
@@ -218,9 +224,9 @@ def plan(
 # -- execution -------------------------------------------------------------------
 
 
-def _run(args: list[str], cwd: Path, say: Say) -> None:
+def _run(args: list[str], cwd: Path, say: Say, *, env: dict[str, str] | None = None) -> None:
     say(f"  $ {' '.join(args)}")
-    proc = subprocess.run(args, cwd=cwd)
+    proc = subprocess.run(args, cwd=cwd, env=env)
     if proc.returncode != 0:
         raise ReleaseError(f"command failed ({proc.returncode}): {' '.join(args)}")
 
@@ -274,6 +280,9 @@ def _build(config: Config, item: PackagePlan, say: Say) -> list[Path]:
     if not settings.build:
         say(f"→ {package.name} is marked build = false; another workflow builds and publishes it from the tag")
         return []
+    out_dir = config.root / "dist" / package.tag_component
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
     if package.ecosystem == "npm":
         # Build the package and the workspace packages it depends on; pnpm publish packs
         # whatever `files` names, so the build must come first.
@@ -282,10 +291,17 @@ def _build(config: Config, item: PackagePlan, say: Say) -> list[Path]:
                 _run(["pnpm", "run", "build"], config.pnpm_dir, say)
             else:
                 _run(["pnpm", "--filter", f"{package.name}...", "run", "build"], config.pnpm_dir, say)
-        return []
-    out_dir = config.root / "dist" / package.tag_component
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
+        out_dir.mkdir(parents=True)
+        _run(["pnpm", "pack", "--pack-destination", str(out_dir)], config.root / package.dir, say)
+        files = list(out_dir.glob("*.tgz"))
+        if len(files) != 1:
+            raise ReleaseError("pnpm pack did not produce exactly one tarball")
+        with tarfile.open(files[0]) as archive:
+            manifest = archive.extractfile("package/package.json")
+            data = json.load(manifest) if manifest else {}
+        if data.get("name") != package.name or data.get("version") != str(item.version):
+            raise ReleaseError("packed npm metadata does not match the planned release")
+        return files
     _run(
         ["uv", "build", "--package", package.name, "--out-dir", str(out_dir)],
         config.root,
@@ -305,16 +321,25 @@ def _build(config: Config, item: PackagePlan, say: Say) -> list[Path]:
 def _publish(config: Config, item: PackagePlan, files: list[Path], say: Say) -> None:
     package = item.package
     if package.ecosystem == "python":
-        _run(["uv", "publish", *(str(f) for f in files)], config.root, say)
+        target = registry.python_target(config)
+        _run(
+            ["uv", "publish", "--publish-url", target.publish_url, *(str(f) for f in files)],
+            config.root,
+            say,
+            env=registry.python_publish_env(config),
+        )
         return
-    # `--filter` needs the recursive form; a bare `pnpm publish` publishes the root package.
-    if config.is_pnpm_root(package.dir):
-        args = ["pnpm", "publish", "--no-git-checks", "--access", "public"]
-    else:
-        args = ["pnpm", "-r", "publish", "--filter", package.name, "--no-git-checks", "--access", "public"]
+    # Publish the exact artifact that was built and checked, also retained on failure.
+    args = ["pnpm", "publish", str(files[0]), "--no-git-checks"]
+    url = registry.npm_target(config, package.name, package)
+    args += ["--registry", url]
     # In GitHub Actions with `id-token: write`, attach a provenance attestation. Publishing
     # still authenticates with the token; the attestation only records where the build ran.
-    if os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"):
+    if url == registry.NPM_REGISTRY:
+        args += ["--access", "public"]
+    else:
+        args.append("--provenance=false")
+    if url == registry.NPM_REGISTRY and os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"):
         args.append("--provenance")
     _run(args, config.pnpm_dir, say)
 
@@ -356,74 +381,113 @@ def execute(
                     _run_shell(command, root, say)
         else:
             say("→ tests skipped (--skip-tests)")
-    except ReleaseError:
+    except (ReleaseError, PackageError):
         say("✗ reverting version changes")
         repo.checkout_paths([p.relative_to(root) for p in touched if p.exists()])
         raise
 
-    if publish:
-        for item in items:
-            if not config.package(item.package.name).publish:
-                say(f"→ {item.package.name} is marked publish = false; not uploaded")
-                continue
-            say(f"→ publishing {item.package.name} {item.version}")
-            try:
+    uploaded: list[str] = []
+    attempted: str | None = None
+    phase = "publication"
+    base = repo.head()
+
+    def interrupted(exc: Exception) -> ReleaseError:
+        directory = root / "dist" / "ship-recovery"
+        directory.mkdir(parents=True, exist_ok=True)
+        receipt = {
+            "source_commit": base,
+            "phase": phase,
+            "uploaded": uploaded,
+            "uncertain": attempted,
+            "packages": [
+                {
+                    "name": i.package.name,
+                    "version": str(i.version),
+                    "tag": i.tag,
+                    "manifest": str(i.package.manifest),
+                    "files": [str(f.relative_to(root)) for f in built.get(i.package.name, [])],
+                }
+                for i in items
+            ],
+        }
+        (directory / "release.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        (directory / "release.patch").write_text(
+            repo.git("diff", base, "--", *(str(p.relative_to(root)) for p in touched))
+        )
+        return ReleaseError(
+            f"release interrupted during {phase}: {exc}\n"
+            f"Completed uploads: {', '.join(uploaded) or 'none confirmed'}.\n"
+            + (
+                f"{attempted} may be partially uploaded; inspect its registry files before retrying.\n"
+                if attempted
+                else ""
+            )
+            + "Release versions and build files were preserved; no upload was undone.\n"
+            + f"Recovery details: {directory / 'release.json'} and release.patch.\n"
+            + "Use the original source commit and built files to finish only missing uploads. "
+            "Then finish the release commit/tags and development restore as described in README: Interrupted releases. "
+            "Do not rerun a normal release or bump again to conceal the partial result."
+        )
+
+    try:
+        if publish:
+            for item in items:
+                if not config.package(item.package.name).publish:
+                    say(f"→ {item.package.name} is marked publish = false; not uploaded")
+                    continue
+                attempted = item.package.name
+                say(f"→ publishing {item.package.name} {item.version}")
                 _publish(config, item, built[item.package.name], say)
-            except ReleaseError:
-                say("✗ publish failed; reverting version changes (nothing was pushed)")
-                repo.checkout_paths([p.relative_to(root) for p in touched if p.exists()])
-                raise
-    else:
-        say("→ publish skipped (--no-publish)")
+                uploaded.append(item.package.name)
+                attempted = None
+        else:
+            say("→ publish skipped (--no-publish)")
 
-    # From here on the registry may already hold the version: never revert, only report.
-    summary = ", ".join(f"{i.package.name} {i.version}" for i in items)
-    repo.add([p.relative_to(root) for p in touched if p.exists()])
-    repo.commit(summary)
-    for item in items:
-        repo.tag(item.tag, f"{item.package.name} {item.version}")
-    tags = [item.tag for item in items]
-    say(f"→ committed and tagged: {', '.join(tags)}")
+        phase = "release commit and tags"
+        summary = ", ".join(f"{i.package.name} {i.version}" for i in items)
+        repo.add([p.relative_to(root) for p in touched if p.exists()])
+        repo.commit(summary)
+        for item in items:
+            repo.tag(item.tag, f"{item.package.name} {item.version}")
+        tags = [item.tag for item in items]
+        say(f"→ committed and tagged: {', '.join(tags)}")
 
-    if push:
-        try:
+        if push:
+            phase = "release push"
             refs = [f"HEAD:refs/heads/{config.branch}", *(f"refs/tags/{t}" for t in tags)]
             say(f"  $ git push --atomic {config.remote} {' '.join(refs)}")
             repo.git("push", "--quiet", "--atomic", config.remote, *refs)
-        except GitError as exc:
-            raise ReleaseError(
-                f"{exc}\nThe release is published and tagged locally. Recover with:\n"
-                f"  git push --atomic {config.remote} HEAD:refs/heads/{config.branch} "
-                + " ".join(f"refs/tags/{t}" for t in tags)
-                + "\nthen run the development-version restore by hand (see README)."
-            ) from exc
-        if config.github_release and shutil.which("gh"):
-            for item in items:
-                args = [
-                    "gh",
-                    "release",
-                    "create",
-                    item.tag,
-                    "--verify-tag",
-                    "--generate-notes",
-                    "--title",
-                    f"{item.package.name} {item.version}",
-                ]
-                args += [str(f) for f in built.get(item.package.name, [])]
-                say(f"  $ {' '.join(args)}")
-                proc = subprocess.run(args, cwd=root)
-                if proc.returncode != 0:
-                    say(f"! GitHub release for {item.tag} failed; the tag and package are published")
-    else:
-        say("→ push skipped (--no-push); the commit and tags are local")
+            if config.github_release and shutil.which("gh"):
+                for item in items:
+                    args = [
+                        "gh",
+                        "release",
+                        "create",
+                        item.tag,
+                        "--verify-tag",
+                        "--generate-notes",
+                        "--title",
+                        f"{item.package.name} {item.version}",
+                    ]
+                    args += [str(f) for f in built.get(item.package.name, [])]
+                    say(f"  $ {shlex.join(args)}")
+                    proc = subprocess.run(args, cwd=root)
+                    if proc.returncode != 0:
+                        say(f"! GitHub release for {item.tag} failed; the tag and package are published")
+        else:
+            say("→ push skipped (--no-push); the commit and tags are local")
 
-    for item in items:
-        write_version(root, item.package, item.version.dev)
-    repo.add([p.relative_to(root) for p in touched if p.exists()])
-    repo.commit(RESTORE_SUBJECT + ", ".join(i.version.dev for i in items))
-    if push:
-        repo.push(config.remote, config.branch)
-    say("→ development versions restored")
+        phase = "development-version restore"
+        for item in items:
+            write_version(root, item.package, item.version.dev)
+        repo.add([p.relative_to(root) for p in touched if p.exists()])
+        repo.commit(RESTORE_SUBJECT + ", ".join(i.version.dev for i in items))
+        if push:
+            phase = "development-version push"
+            repo.push(config.remote, config.branch)
+        say("→ development versions restored")
+    except (ReleaseError, PackageError, GitError, registry.RegistryError) as exc:
+        raise interrupted(exc) from exc
 
     for item in items:
         say("")

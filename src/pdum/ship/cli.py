@@ -187,6 +187,7 @@ def deps_refresh(
     repo, cfg, pkgs = _load()
     if not repo.is_clean():
         fail("the working tree has uncommitted changes; refresh needs a clean tree")
+    before = deps.lock_state(cfg)
     try:
         moved = deps.refresh(
             repo,
@@ -204,7 +205,7 @@ def deps_refresh(
     if dry_run:
         return
     if not moved:
-        say("lockfiles unchanged")
+        say("lockfiles unchanged" if deps.lock_state(cfg) == before else "lockfile metadata updated and not committed")
         return
     say("")
     say("package\tbefore\tafter\tchange")

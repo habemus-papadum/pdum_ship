@@ -35,6 +35,7 @@ class Package:
     dir: Path  # relative to the repository root
     manifest: Path  # relative to the repository root
     tag_component: str
+    publishable: bool = True
 
     def tag(self, version: str) -> str:
         return f"{self.tag_component}-v{version}"
@@ -53,14 +54,21 @@ def unscoped(name: str) -> str:
 
 
 def discover(config: Config) -> list[Package]:
-    root = config.root
-    found: list[Package] = []
-    found.extend(_python_packages(root, config))
-    found.extend(_npm_packages(root, config))
+    """The release inventory; dependency operations use ``projects`` instead."""
+    found = [p for p in projects(config) if p.publishable]
     names = [p.name for p in found]
     duplicates = {n for n in names if names.count(n) > 1}
     if duplicates:
         raise PackageError(f"package names are not unique: {sorted(duplicates)}")
+    return found
+
+
+def projects(config: Config) -> list[Package]:
+    """Every workspace project, including private apps and virtual Python projects."""
+    root = config.root
+    found: list[Package] = []
+    found.extend(_python_packages(root, config))
+    found.extend(_npm_packages(root, config))
     return found
 
 
@@ -87,8 +95,6 @@ def _python_packages(root: Path, config: Config) -> list[Package]:
         project = member_data.get("project")
         if not project or "name" not in project:
             continue
-        if member_data.get("tool", {}).get("uv", {}).get("package") is False:
-            continue
         name = project["name"]
         packages.append(
             Package(
@@ -97,6 +103,7 @@ def _python_packages(root: Path, config: Config) -> list[Package]:
                 dir=directory.relative_to(root),
                 manifest=manifest.relative_to(root),
                 tag_component=config.package(name).tag or name,
+                publishable=member_data.get("tool", {}).get("uv", {}).get("package") is not False,
             )
         )
     return packages
@@ -110,12 +117,18 @@ def _npm_packages(root: Path, config: Config) -> list[Package]:
     workspace_file = base / "pnpm-workspace.yaml"
     if workspace_file.exists():
         workspace = yaml.safe_load(workspace_file.read_text()) or {}
+        excluded = {
+            p.resolve()
+            for pattern in workspace.get("packages", []) or []
+            if pattern.startswith("!")
+            for p in base.glob(pattern[1:])
+        }
         for pattern in workspace.get("packages", []) or []:
             negate = pattern.startswith("!")
             if negate:
                 continue
             for member in sorted(base.glob(pattern)):
-                if (member / "package.json").exists() and member not in dirs:
+                if member.resolve() not in excluded and (member / "package.json").exists() and member not in dirs:
                     dirs.append(member)
 
     packages: list[Package] = []
@@ -123,7 +136,7 @@ def _npm_packages(root: Path, config: Config) -> list[Package]:
         manifest = directory / "package.json"
         data = json.loads(manifest.read_text())
         name = data.get("name")
-        if not name or data.get("private"):
+        if not name:
             continue
         packages.append(
             Package(
@@ -132,6 +145,7 @@ def _npm_packages(root: Path, config: Config) -> list[Package]:
                 dir=directory.relative_to(root.resolve()),
                 manifest=manifest.relative_to(root.resolve()),
                 tag_component=config.package(name).tag or unscoped(name),
+                publishable=not data.get("private", False),
             )
         )
     return packages

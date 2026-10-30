@@ -187,3 +187,65 @@ def pnpm_repo(tmp_path: Path, request: pytest.FixtureRequest) -> DemoRepo:
     demo.commit_all("initial")
     demo.git("push", "-q", "-u", "origin", "main")
     return demo
+
+
+@pytest.fixture
+def registry_server():
+    """Local HTTP registry: tests use real uv/pnpm without any production uploads."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import unquote
+
+    state = {"routes": {}, "requests": [], "auth": None}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def handle_request(self):
+            body = b""
+            if self.headers.get("Transfer-Encoding") == "chunked":
+                while True:
+                    size = int(self.rfile.readline().split(b";", 1)[0], 16)
+                    if not size:
+                        self.rfile.readline()
+                        break
+                    body += self.rfile.read(size)
+                    self.rfile.read(2)
+            else:
+                body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            path = unquote(self.path.split("?", 1)[0])
+            state["requests"].append((self.command, path, self.headers.get("Authorization"), body))
+            if state["auth"] and self.headers.get("Authorization") != state["auth"]:
+                status, data, headers = 401, {"error": "authentication required"}, {}
+            elif self.command in ("PUT", "POST"):
+                status, data, headers = 201, {"ok": True}, {}
+            else:
+                status, data, headers = state["routes"].get(path, (404, {"error": "not found"}, {}))
+            payload = data if isinstance(data, bytes) else json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", headers.get("Content-Type", "application/json"))
+            self.send_header("Content-Length", str(len(payload)))
+            for key, value in headers.items():
+                if key != "Content-Type":
+                    self.send_header(key, value)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(payload)
+
+        do_GET = handle_request
+        do_HEAD = handle_request
+        do_POST = handle_request
+        do_PUT = handle_request
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    state["url"] = f"http://127.0.0.1:{server.server_port}"
+    try:
+        yield state
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

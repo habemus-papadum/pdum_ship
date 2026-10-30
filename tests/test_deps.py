@@ -176,7 +176,12 @@ def test_refresh_refuses_third_party_downgrades(single_repo, monkeypatch):
     repo, cfg, pkgs = load(single_repo)
     lock = single_repo.root / "uv.lock"
     original = lock.read_text()
-    snapshots = iter([{"demo-lib": "1.0.0", "attrs": "24.0.0"}, {"demo-lib": "1.1.0", "attrs": "23.0.0"}])
+    snapshots = iter(
+        [
+            {("python", "demo-lib"): frozenset(["1.0.0"]), ("python", "attrs"): frozenset(["24.0.0"])},
+            {("python", "demo-lib"): frozenset(["1.1.0"]), ("python", "attrs"): frozenset(["23.0.0"])},
+        ]
+    )
     monkeypatch.setattr(deps, "lock_versions", lambda root: next(snapshots))
     monkeypatch.setattr(deps, "uv_lock_registry_packages", lambda root: {"demo-lib", "attrs"})
 

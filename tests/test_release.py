@@ -276,3 +276,54 @@ def test_ignore_subjects_excludes_an_old_pipelines_commits(single_repo):
     assert cfg.ignore_subjects == ["back to dev"]
     # The pyproject edit itself is uncommitted; the ignored commit no longer counts.
     assert release.commits_since_release(repo, cfg, pkgs[0]) == []
+
+
+def test_partial_publication_preserves_versions_and_recovery_files(pnpm_repo, monkeypatch):
+    import json
+    from dataclasses import replace
+
+    repo, cfg, pkgs = load(pnpm_repo)
+    cfg = replace(cfg, coupled="synthetic coupled release")
+    plan = release.plan(repo, cfg, pkgs, selected=None, bump="minor", version=None, registry_check=False)
+    uploaded = []
+
+    def publish(config, item, files, say):
+        if uploaded:
+            raise release.ReleaseError("simulated upload failure")
+        uploaded.append(item.package.name)
+
+    monkeypatch.setattr(release, "_publish", publish)
+    monkeypatch.setenv("NPM_TOKEN", "synthetic-secret-not-for-receipts")
+    with pytest.raises(release.ReleaseError, match="may be partially uploaded"):
+        release.execute(repo, cfg, plan, publish=True, push=True, run_tests=False, say=lambda x: None)
+    assert uploaded == ["@demo/core"]
+    assert repo.tags("*") == []
+    assert all(packages_mod.read_version(cfg.root, p) == "0.1.0" for p in pkgs)
+    receipt = (cfg.root / "dist/ship-recovery/release.json").read_text()
+    data = json.loads(receipt)
+    assert data["uploaded"] == uploaded and data["uncertain"] == "@demo/plugin"
+    assert "synthetic-secret" not in receipt
+    assert (cfg.root / "dist/ship-recovery/release.patch").read_text()
+    assert len(list((cfg.root / "dist").glob("*/*.tgz"))) == 2
+
+
+def test_post_upload_push_failure_reports_phase_and_keeps_release(single_repo, monkeypatch):
+    import json
+
+    repo, cfg, pkgs = load(single_repo)
+    plan = release.plan(repo, cfg, pkgs, selected=pkgs[0], bump="minor", version=None, registry_check=False)
+    monkeypatch.setattr(release, "_publish", lambda *args: None)
+    git = repo.git
+
+    def fail_push(*args, **kwargs):
+        if args[0] == "push":
+            raise release.GitError("simulated network failure")
+        return git(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "git", fail_push)
+    with pytest.raises(release.ReleaseError, match="release push"):
+        release.execute(repo, cfg, plan, publish=True, push=True, run_tests=False, say=lambda x: None)
+    assert packages_mod.read_version(cfg.root, pkgs[0]) == "0.1.0"
+    data = json.loads((cfg.root / "dist/ship-recovery/release.json").read_text())
+    assert data["uploaded"] == ["demo-pkg"] and data["uncertain"] is None
+    assert repo.tags("*") == ["demo-pkg-v0.1.0"]

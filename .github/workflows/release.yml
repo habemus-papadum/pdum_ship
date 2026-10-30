@@ -47,6 +47,14 @@ on:
         description: pnpm version to install when package.json pins none in packageManager
         type: string
         default: "latest"
+      npm_registry:
+        description: Registry for npm credentials (publishConfig and scope mappings select packages)
+        type: string
+        default: https://registry.npmjs.org
+      python_registry:
+        description: Private Python index URL for native credential setup; empty for public PyPI
+        type: string
+        default: ""
   workflow_call:
     inputs:
       package:
@@ -85,10 +93,25 @@ on:
         description: pnpm version to install when package.json pins none in packageManager
         type: string
         default: "latest"
+      npm_registry:
+        description: Registry for npm credentials (publishConfig and scope mappings select packages)
+        type: string
+        default: https://registry.npmjs.org
+      python_registry:
+        description: Private Python index URL for native credential setup; empty for public PyPI
+        type: string
+        default: ""
     secrets:
       PYPI_API_TOKEN:
         required: false
       NPM_TOKEN:
+        required: false
+      NPM_BASIC_AUTH:
+        description: Optional base64 username:password for a private npm registry, instead of NPM_TOKEN
+        required: false
+      PYTHON_USERNAME:
+        required: false
+      PYTHON_PASSWORD:
         required: false
 
 permissions:
@@ -113,6 +136,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NPM_BASIC_AUTH: ${{ secrets.NPM_BASIC_AUTH }}
+      UV_PUBLISH_USERNAME: ${{ secrets.PYTHON_USERNAME }}
+      UV_PUBLISH_PASSWORD: ${{ secrets.PYTHON_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -159,14 +186,14 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
           cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org
+          registry-url: ${{ inputs.npm_registry }}
       - uses: actions/setup-node@v5
         if: steps.pnpm.outputs.present == 'true' && hashFiles('.nvmrc') == ''
         with:
           node-version: ${{ inputs.node_version }}
           cache: pnpm
           cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org
+          registry-url: ${{ inputs.npm_registry }}
 
       - name: Require a successful CI run
         if: ${{ !inputs.skip_ci_check }}
@@ -268,6 +295,50 @@ jobs:
           if __name__ == "__main__":
               main()
 
+      - name: Configure private registry credentials
+        env:
+          PYTHON_REGISTRY: ${{ inputs.python_registry }}
+          NPM_REGISTRY: ${{ inputs.npm_registry }}
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          from urllib.parse import urlsplit
+
+          def registry_url(value):
+              url = urlsplit(value)
+              if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
+                  raise SystemExit("Registry credentials require an HTTPS URL without embedded credentials.")
+              return url
+
+          username = os.environ.get("UV_PUBLISH_USERNAME")
+          password = os.environ.get("UV_PUBLISH_PASSWORD")
+          if username or password:
+              if not username or not password or not os.environ.get("PYTHON_REGISTRY"):
+                  raise SystemExit("Supply python_registry, PYTHON_USERNAME and PYTHON_PASSWORD together.")
+              registry_url(os.environ["PYTHON_REGISTRY"])
+              subprocess.run(["uv", "auth", "login", os.environ["PYTHON_REGISTRY"],
+                              "--username", username, "--password", "-"], input=password, text=True, check=True)
+          # setup-node prepares a trusted auth file. Keep private registry routing
+          # in the repository's scope mappings/publishConfig, so public dependencies
+          # do not get redirected to a private registry that is not a proxy.
+          if os.environ.get("NPM_CONFIG_USERCONFIG") and os.environ["NPM_REGISTRY"].rstrip("/") != "https://registry.npmjs.org":
+              registry_url(os.environ["NPM_REGISTRY"])
+              path = Path(os.environ["NPM_CONFIG_USERCONFIG"])
+              lines = path.read_text().splitlines()
+              path.write_text("\n".join(line for line in lines if not (
+                  line.partition("=")[0].strip() == "registry" and
+                  line.partition("=")[2].strip().rstrip("/") == os.environ["NPM_REGISTRY"].rstrip("/")
+              )) + "\n")
+          if os.environ.get("NPM_BASIC_AUTH"):
+              if os.environ.get("NODE_AUTH_TOKEN"):
+                  raise SystemExit("Choose NPM_TOKEN or NPM_BASIC_AUTH, not both.")
+              url = registry_url(os.environ["NPM_REGISTRY"])
+              key = "//" + url.netloc + url.path.rstrip("/") + "/:_auth"
+              with Path(os.environ["NPM_CONFIG_USERCONFIG"]).open("a") as config:
+                  config.write("\n" + key + "=${NPM_BASIC_AUTH}\n")
+
       - name: Install the repository
         env:
           PNPM_ROOT: ${{ steps.pnpm.outputs.root }}
@@ -282,10 +353,10 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           PNPM_ROOT: ${{ steps.pnpm.outputs.root }}
         run: |
-          if [ -f uv.lock ] && [ -z "$PYPI_API_TOKEN" ]; then
+          if [ -f uv.lock ] && [ -z "$PYPI_API_TOKEN" ] && [ -z "$UV_PUBLISH_PASSWORD" ]; then
             echo "::warning::PYPI_API_TOKEN is not set; a Python publish will fail."
           fi
-          if [ -f "$PNPM_ROOT/pnpm-lock.yaml" ] && [ -z "$NPM_TOKEN" ]; then
+          if [ -f "$PNPM_ROOT/pnpm-lock.yaml" ] && [ -z "$NPM_TOKEN" ] && [ -z "$NPM_BASIC_AUTH" ]; then
             echo "::warning::NPM_TOKEN is not set; an npm publish will fail."
           fi
 
@@ -307,3 +378,12 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then args+=(--dry-run); fi
           if [ "${{ inputs.skip_tests }}" = "true" ]; then args+=(--skip-tests); fi
           uv run --locked ship "${args[@]}" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve interrupted release files
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interrupted-release
+          path: dist/
+          if-no-files-found: ignore
+          retention-days: 7

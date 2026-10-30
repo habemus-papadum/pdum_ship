@@ -46,6 +46,8 @@ class Config:
     packages: dict[str, PackageConfig] = field(default_factory=dict)
     # Directory of the pnpm workspace relative to the repository root; "." by default.
     pnpm_root: str = "."
+    python_index: str | None = None
+    index_url: str | None = None
 
     @property
     def pnpm_dir(self) -> Path:
@@ -122,6 +124,11 @@ def load(root: Path) -> Config:
         raise ConfigError("[tool.ship] `pnpm-root` is the pnpm workspace directory relative to the repository root.")
     if not (root / pnpm_root).is_dir():
         raise ConfigError(f"[tool.ship] pnpm-root = {pnpm_root!r} is not a directory under {root}.")
+    for key in ("python-index", "index-url"):
+        if key in table and (not isinstance(table[key], str) or not table[key].strip()):
+            raise ConfigError(f"[tool.ship] {key} must be a non-empty string")
+    if table.get("python-index") and table.get("index-url"):
+        raise ConfigError("choose python-index or index-url, not both")
 
     return Config(
         root=root,
@@ -137,4 +144,6 @@ def load(root: Path) -> Config:
         pins=dict(pins),
         packages=packages,
         pnpm_root=pnpm_root,
+        python_index=table.get("python-index"),
+        index_url=table.get("index-url"),
     )

@@ -101,6 +101,19 @@ All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
 
 ## Open items
 
+- The pre-adoption hardening now separates all workspace projects from the
+  publishable inventory, keeps refreshes confined to lockfiles (including
+  catalog floors), preserves duplicate dependency versions and runs tests for
+  private applications. Partial uploads retain their artifacts and report the
+  phase and uncertain package. npm publishes the checked tarball.
+- Private publication uses native uv index configuration or npm registry
+  mappings/publishConfig, with native credentials. `deps check` verifies private
+  Python `upload-time` and npm `time` metadata for locked first-party packages.
+  The workflow can prepare private credentials without changing package routing.
+  Ninety tests pass, including real clients against a local authenticated
+  registry, failed refresh/publication paths and both release-age gates.
+  Source is ready; the new CLI version has not yet been published.
+
 - `ship-check` at tag `habemus-papadum-ship-v0.1.0` has an invalid manifest
   (fixed in `main`; released as 0.1.1). Repositories reference 0.1.1 or later.
 - `pdum-aiui-intent-tool-v0`: archive the repository on GitHub (operator

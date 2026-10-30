@@ -17,19 +17,23 @@ from pathlib import Path
 import yaml
 
 from .config import Config
-from .packages import Package, read_version
+from .packages import Package, projects, read_version
 from .repo import Repo
 from .versions import ZERO, split_dev
 
 # -- lockfiles -------------------------------------------------------------------
 
 
-def uv_lock_versions(root: Path) -> dict[str, str]:
+def uv_lock_versions(root: Path) -> dict[str, frozenset[str]]:
     lock = root / "uv.lock"
     if not lock.exists():
         return {}
     data = tomllib.loads(lock.read_text())
-    return {p["name"]: p.get("version", "") for p in data.get("package", []) if "name" in p}
+    versions: dict[str, set[str]] = {}
+    for p in data.get("package", []):
+        if "name" in p:
+            versions.setdefault(p["name"], set()).add(p.get("version", ""))
+    return {name: frozenset(values) for name, values in versions.items()}
 
 
 def uv_lock_registry_packages(root: Path) -> set[str]:
@@ -49,21 +53,24 @@ def uv_lock_registry_packages(root: Path) -> set[str]:
 _PNPM_KEY_RE = re.compile(r"^(?P<name>@?[^@]+)@(?P<version>[^(]+)")
 
 
-def pnpm_lock_versions(pnpm_dir: Path) -> dict[str, str]:
+def pnpm_lock_versions(pnpm_dir: Path) -> dict[str, frozenset[str]]:
     lock = pnpm_dir / "pnpm-lock.yaml"
     if not lock.exists():
         return {}
     data = yaml.safe_load(lock.read_text()) or {}
-    versions: dict[str, str] = {}
+    versions: dict[str, set[str]] = {}
     for key in data.get("packages") or {}:
         match = _PNPM_KEY_RE.match(key)
         if match:
-            versions[match.group("name")] = match.group("version")
-    return versions
+            versions.setdefault(match.group("name"), set()).add(match.group("version"))
+    return {name: frozenset(values) for name, values in versions.items()}
 
 
-def lock_versions(config: Config) -> dict[str, str]:
-    return {**uv_lock_versions(config.root), **pnpm_lock_versions(config.pnpm_dir)}
+def lock_versions(config: Config) -> dict[tuple[str, str], frozenset[str]]:
+    return {
+        **{("python", name): versions for name, versions in uv_lock_versions(config.root).items()},
+        **{("npm", name): versions for name, versions in pnpm_lock_versions(config.pnpm_dir).items()},
+    }
 
 
 # -- refresh ---------------------------------------------------------------------
@@ -74,6 +81,7 @@ class Moved:
     name: str
     before: str | None
     after: str | None
+    ecosystem: str = ""
 
     @property
     def kind(self) -> str:
@@ -108,12 +116,41 @@ def _lockfiles(config: Config) -> list[Path]:
     return [p for p in (config.root / "uv.lock", _pnpm_lock(config)) if p.exists()]
 
 
-def _moved(before: dict[str, str], after: dict[str, str]) -> list[Moved]:
-    return [
-        Moved(name, before.get(name), after.get(name))
-        for name in sorted(set(before) | set(after))
-        if before.get(name) != after.get(name)
-    ]
+def lock_state(config: Config) -> dict[Path, bytes]:
+    return {p: p.read_bytes() for p in _lockfiles(config)}
+
+
+def refresh_tests(config: Config) -> list[str]:
+    """Repository tests apply even when the repository publishes nothing."""
+    from .release import default_tests
+
+    commands = list(config.test or [])
+    for project in projects(config):
+        override = config.package(project.name).test
+        if override is not None:
+            commands.extend(override)
+        elif config.test is None:
+            if project.ecosystem == "npm":
+                data = json.loads((config.root / project.manifest).read_text())
+                if "test" in data.get("scripts", {}):
+                    commands.extend(default_tests(config, project))
+            elif project.publishable or not (config.pnpm_dir / "package.json").exists():
+                commands.extend(default_tests(config, project))
+    return list(dict.fromkeys(commands))
+
+
+def _moved(before: dict[tuple[str, str], frozenset[str]], after: dict[tuple[str, str], frozenset[str]]) -> list[Moved]:
+    result = []
+    for ecosystem, name in sorted(before.keys() | after.keys()):
+        old = before.get((ecosystem, name), frozenset())
+        new = after.get((ecosystem, name), frozenset())
+        removed = sorted(old - new, key=_version_key)
+        added = sorted(new - old, key=_version_key)
+        for i in range(max(len(removed), len(added))):
+            result.append(
+                Moved(name, removed[i] if i < len(removed) else None, added[i] if i < len(added) else None, ecosystem)
+            )
+    return result
 
 
 def _table(moved: list[Moved]) -> str:
@@ -142,12 +179,20 @@ def refresh(
     root = config.root
     before = lock_versions(config)
     workspace_names = {p.name for p in packages}
-    lockfiles = [p.relative_to(root) for p in _lockfiles(config)]
+    # Snapshot the exact inputs too: native package-manager behavior must not
+    # silently turn a lock refresh into a dependency declaration change.
+    manifests = {*_python_manifests(config, packages), *_npm_manifests(config, packages)}
+    manifests.add(config.pnpm_dir / "pnpm-workspace.yaml")
+    snapshots = {p: p.read_bytes() if p.exists() else None for p in [*_lockfiles(config), *manifests]}
+    lock_before = lock_state(config)
 
     def restore(message: str) -> RefreshError:
-        if lockfiles:
-            repo.checkout_paths(lockfiles)
-        return RefreshError(message + "\nThe lockfiles are back as they were.")
+        for path, content in snapshots.items():
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(content)
+        return RefreshError(message + "\nThe lockfiles and dependency declarations are back as they were.")
 
     # Each command runs in the directory of the lockfile it moves.
     commands: list[tuple[list[str], Path]] = []
@@ -165,11 +210,11 @@ def refresh(
                 commands.append((args, root))
     if _pnpm_lock(config).exists():
         if everything:
-            commands.append((["pnpm", "update", "-r"], config.pnpm_dir))
+            commands.append((["pnpm", "update", "-r", "--no-save", "--lockfile-only"], config.pnpm_dir))
         else:
-            patterns = [p for p in config.ours if p.startswith("@") or "/" in p]
-            if patterns:
-                commands.append((["pnpm", "update", "-r", *patterns], config.pnpm_dir))
+            names = sorted(n for n in pnpm_lock_versions(config.pnpm_dir) if config.is_ours(n))
+            if names:
+                commands.append((["pnpm", "update", "-r", "--no-save", "--lockfile-only", *names], config.pnpm_dir))
 
     if not commands:
         say("nothing to refresh: no lockfile holds one of our packages")
@@ -184,8 +229,10 @@ def refresh(
     if dry_run:
         return []
 
+    if any((p.read_bytes() if p.exists() else None) != snapshots[p] for p in manifests):
+        raise restore("refresh changed a dependency declaration; only lockfiles may change")
     moved = _moved(before, lock_versions(config))
-    if not moved:
+    if lock_state(config) == lock_before:
         return []
 
     if not everything:
@@ -213,18 +260,16 @@ def refresh(
             raise restore(f"install failed after the lockfile moved:\n{_table(moved)}\n  $ {' '.join(args)}")
 
     if run_tests:
-        seen: set[str] = set()
-        for package in packages:
-            from .release import default_tests  # local import: release imports deps
-
-            for command in default_tests(config, package):
-                if command in seen:
-                    continue
-                seen.add(command)
-                say(f"  $ {command}")
-                proc = subprocess.run(command, cwd=root, shell=True)
-                if proc.returncode != 0:
-                    raise restore(f"tests failed after the lockfile moved:\n{_table(moved)}\n  $ {command}")
+        commands_to_test = refresh_tests(config)
+        if not commands_to_test and config.test is None:
+            raise restore("no refresh tests found; configure [tool.ship] test or explicitly use --no-test")
+        for command in commands_to_test:
+            say(f"  $ {command}")
+            proc = subprocess.run(command, cwd=root, shell=True)
+            if proc.returncode != 0:
+                raise restore(f"tests failed after the lockfile moved:\n{_table(moved)}\n  $ {command}")
+    if any((p.read_bytes() if p.exists() else None) != snapshots[p] for p in manifests):
+        raise restore("install or tests changed a dependency declaration")
     return moved
 
 
@@ -233,13 +278,13 @@ def refresh(
 
 def _python_manifests(config: Config, packages: list[Package]) -> list[Path]:
     paths = {config.root / "pyproject.toml"}
-    paths.update(config.root / p.manifest for p in packages if p.ecosystem == "python")
+    paths.update(config.root / p.manifest for p in projects(config) if p.ecosystem == "python")
     return sorted(p for p in paths if p.exists())
 
 
 def _npm_manifests(config: Config, packages: list[Package]) -> list[Path]:
     paths = {config.root / config.pnpm_root / "package.json"}
-    paths.update(config.root / p.manifest for p in packages if p.ecosystem == "npm")
+    paths.update(config.root / p.manifest for p in projects(config) if p.ecosystem == "npm")
     return sorted(p for p in paths if p.exists())
 
 
@@ -390,4 +435,10 @@ def check(repo: Repo, config: Config, packages: list[Package], *, hook: bool) ->
     problems += marker_problems(repo, config, packages)
     if config.coupled is not None and not config.coupled.strip():
         problems.append("[tool.ship] coupled must give the reason, not an empty string")
+    from . import registry
+
+    try:
+        problems += registry.check_timestamps(config)
+    except registry.RegistryError as exc:
+        problems.append(str(exc))
     return problems
