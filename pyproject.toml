@@ -1,6 +1,6 @@
 [project]
 name = "habemus-papadum-ship"
-version = "0.10.0"
+version = "0.10.0+dev"
 description = "Release packages and refresh dependencies across uv and pnpm workspaces: one version per package, the tag is the truth, a +dev marker between releases."
 readme = "README.md"
 license = { file = "LICENSE" }
