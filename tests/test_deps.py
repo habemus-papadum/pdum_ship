@@ -213,3 +213,49 @@ def test_refresh_refuses_third_party_downgrades(single_repo, monkeypatch):
         )
     assert lock.read_text() == original  # restored
     assert repo.is_clean()
+
+
+@pytest.mark.parametrize("group", ["", "house"])
+def test_catalog_floors_and_reasoned_pins(tmp_path, group):
+    from pdum.ship.config import Config
+
+    cfg = Config(root=tmp_path, ours=["@demo/*"])
+    (tmp_path / "package.json").write_text(
+        json.dumps({"private": True, "dependencies": {"@demo/lib": "catalog:" + group}})
+    )
+    workspace = tmp_path / "pnpm-workspace.yaml"
+    prefix = "catalog:\n" if not group else "catalogs:\n  house:\n"
+    indent = "  " if not group else "    "
+    workspace.write_text(prefix + indent + '"@demo/lib": ^0.2.0\n')
+    assert any("pnpm-workspace.yaml" in p and "is narrow" in p for p in deps.pin_problems(cfg, []))
+    cfg.pins["@demo/lib"] = "Keep old API until importer migration"
+    assert deps.pin_problems(cfg, []) == []
+    cfg.pins.clear()
+    workspace.write_text(prefix + indent + '"@demo/lib": ">=0.2.0"\n')
+    assert deps.pin_problems(cfg, []) == []
+
+
+def test_catalog_peer_is_checked_at_resolved_range(tmp_path):
+    from pdum.ship.config import Config
+
+    cfg = Config(root=tmp_path, ours=["@demo/*"])
+    (tmp_path / "package.json").write_text(json.dumps({"peerDependencies": {"@demo/lib": "catalog:house"}}))
+    (tmp_path / "pnpm-workspace.yaml").write_text('catalogs:\n  house:\n    "@demo/lib": ^0.1.0\n')
+    assert any("peerDependencies" in p for p in deps.peer_problems(cfg, []))
+
+
+def test_missing_catalog_entry_is_not_silently_accepted(tmp_path):
+    from pdum.ship.config import Config
+
+    cfg = Config(root=tmp_path, ours=["@demo/*"])
+    (tmp_path / "package.json").write_text(json.dumps({"optionalDependencies": {"@demo/lib": "catalog:missing"}}))
+    assert any("missing or invalid" in p for p in deps.pin_problems(cfg, []))
+
+
+def test_nested_unused_catalog_development_link_is_reported(tmp_path):
+    from pdum.ship.config import Config
+
+    (tmp_path / "widgets").mkdir()
+    cfg = Config(root=tmp_path, ours=["@demo/*"], pnpm_root="widgets")
+    (tmp_path / "widgets/pnpm-workspace.yaml").write_text('catalog:\n  "@demo/lib": file:../lib\n')
+    assert any("widgets/pnpm-workspace.yaml" in p for p in deps.dev_link_problems(cfg, []))

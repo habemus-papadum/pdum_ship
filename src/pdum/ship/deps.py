@@ -306,6 +306,11 @@ def dev_link_problems(config: Config, packages: list[Package]) -> list[str]:
                 if isinstance(spec, str) and (spec.startswith("link:") or spec.startswith("file:")):
                     rel = manifest.relative_to(config.root)
                     problems.append(f"{rel}: {section} {name} = {spec!r} is a development link")
+    for group, values in _npm_catalogs(config).items():
+        for name, spec in values.items():
+            if isinstance(spec, str) and spec.startswith(("link:", "file:")):
+                path = (config.pnpm_dir / "pnpm-workspace.yaml").relative_to(config.root)
+                problems.append(f"{path}: catalog:{group} {name} = {spec!r} is a development link")
     return problems
 
 
@@ -340,6 +345,44 @@ def _python_requirements(data: dict) -> list[str]:
     return reqs
 
 
+def _npm_catalogs(config: Config) -> dict[str, dict]:
+    path = config.pnpm_dir / "pnpm-workspace.yaml"
+    if not path.exists():
+        return {"": {}}
+    data = yaml.safe_load(path.read_text()) or {}
+    return {"": data.get("catalog", {}) or {}, **(data.get("catalogs", {}) or {})}
+
+
+def _npm_policy_entries(config: Config, packages: list[Package], sections: tuple[str, ...], *, catalogs: bool = False):
+    """Resolve native catalog aliases; inspect declarations without changing them."""
+    lookup = _npm_catalogs(config)
+    location = str((config.pnpm_dir / "pnpm-workspace.yaml").relative_to(config.root))
+    entries: list[tuple[str, str, str]] = []
+    problems: list[str] = []
+    if catalogs:
+        for group, values in lookup.items():
+            for name, spec in values.items():
+                if isinstance(spec, str):
+                    entries.append((f"{location}: catalog:{group}", name, spec))
+    for manifest in _npm_manifests(config, packages):
+        data = json.loads(manifest.read_text())
+        rel = manifest.relative_to(config.root)
+        for section in sections:
+            for name, spec in (data.get(section) or {}).items():
+                if not isinstance(spec, str):
+                    continue
+                if spec.startswith("catalog:"):
+                    resolved = lookup.get(spec[len("catalog:") :], {}).get(name)
+                    if not isinstance(resolved, str) or resolved.startswith("catalog:"):
+                        problems.append(f"{rel}: {section} {name} refers to missing or invalid {spec!r} entry")
+                        continue
+                    if catalogs:
+                        continue  # the defining catalog entry was already checked
+                    spec = resolved
+                entries.append((f"{rel}: {section}", name, spec))
+    return entries, problems
+
+
 def pin_problems(config: Config, packages: list[Package]) -> list[str]:
     problems: list[str] = []
     for manifest in _python_manifests(config, packages):
@@ -363,40 +406,35 @@ def pin_problems(config: Config, packages: list[Package]) -> list[str]:
                         f"{rel}: {req!r} {what} one of our packages without a reason "
                         f"(add a comment on that line or [tool.ship.pins]); the policy is a floor"
                     )
-    for manifest in _npm_manifests(config, packages):
-        data = json.loads(manifest.read_text())
-        rel = manifest.relative_to(config.root)
-        for section in ("dependencies", "devDependencies"):
-            for name, spec in (data.get(section) or {}).items():
-                if not config.is_ours(name) or not isinstance(spec, str):
-                    continue
-                range_part = spec.removeprefix("workspace:")
-                if re.match(r"^\d", range_part) and name not in config.pins:
-                    problems.append(
-                        f"{rel}: {section} {name} = {spec!r} pins one of our packages "
-                        f"without a reason in [tool.ship.pins]"
-                    )
-                elif range_part.startswith(("^", "~")) and name not in config.pins:
-                    problems.append(
-                        f"{rel}: {section} {name} = {spec!r} is narrow; the policy is a floor "
-                        f"('>=X.Y.0' or 'workspace:>=X.Y.0'), or give a reason in [tool.ship.pins]"
-                    )
+    entries, errors = _npm_policy_entries(
+        config, packages, ("dependencies", "devDependencies", "optionalDependencies"), catalogs=True
+    )
+    problems.extend(errors)
+    for location, name, spec in entries:
+        if not config.is_ours(name):
+            continue
+        range_part = spec.removeprefix("workspace:")
+        if re.match(r"^\d", range_part) and name not in config.pins:
+            problems.append(
+                f"{location}: {name} = {spec!r} pins one of our packages without a reason in [tool.ship.pins]"
+            )
+        elif range_part.startswith(("^", "~")) and name not in config.pins:
+            problems.append(
+                f"{location}: {name} = {spec!r} is narrow; the policy is a floor, or give a reason in [tool.ship.pins]"
+            )
     return problems
 
 
 def peer_problems(config: Config, packages: list[Package]) -> list[str]:
     problems: list[str] = []
-    for manifest in _npm_manifests(config, packages):
-        data = json.loads(manifest.read_text())
-        rel = manifest.relative_to(config.root)
-        for name, spec in (data.get("peerDependencies") or {}).items():
-            if not config.is_ours(name) or not isinstance(spec, str):
-                continue
-            range_part = spec.removeprefix("workspace:")
-            if range_part in ("*", "^", "~") or range_part.startswith(("^", "~")):
-                problems.append(
-                    f"{rel}: peerDependencies {name} = {spec!r} is narrow; use '>=X.Y.0' or 'workspace:>=X.Y.0'"
-                )
+    entries, errors = _npm_policy_entries(config, packages, ("peerDependencies",))
+    problems.extend(errors)
+    for location, name, spec in entries:
+        if not config.is_ours(name):
+            continue
+        range_part = spec.removeprefix("workspace:")
+        if range_part in ("*", "^", "~") or range_part.startswith(("^", "~")):
+            problems.append(f"{location}: {name} = {spec!r} is narrow; use '>=X.Y.0' or 'workspace:>=X.Y.0'")
     return problems
 
 

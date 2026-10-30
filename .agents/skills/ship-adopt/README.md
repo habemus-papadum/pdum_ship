@@ -197,6 +197,9 @@ Reports, and exits 1 on any of:
   `*`, `workspace:^`, `workspace:~` or `workspace:*` (write `>=X.Y.0` or
   `workspace:>=X.Y.0`);
 - a manifest version that is not `<last tag>+dev`;
+- a missing catalog reference, or a first-party pin/cap in the default or named
+  pnpm catalogs without a reason; peer ranges are checked after resolving
+  `catalog:` aliases. Catalog development links are also rejected by the hook;
 - a locked first-party dependency on a private registry whose metadata cannot
   be read or lacks valid publication times (Python file `upload-time`; npm
   version `time`). These network checks stay outside `--hook`.
