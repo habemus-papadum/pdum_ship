@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "habemus-papadum-ship"
-version = "0.10.0+dev"
+version = "0.10.1"
 source = { editable = "." }
 dependencies = [
     { name = "packaging" },
