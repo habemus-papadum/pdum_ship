@@ -197,7 +197,7 @@ def registry_server():
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import unquote
 
-    state = {"routes": {}, "requests": [], "auth": None}
+    state = {"routes": {}, "requests": [], "user_agents": [], "auth": None}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -217,6 +217,7 @@ def registry_server():
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             path = unquote(self.path.split("?", 1)[0])
             state["requests"].append((self.command, path, self.headers.get("Authorization"), body))
+            state["user_agents"].append(self.headers.get("User-Agent"))
             if state["auth"] and self.headers.get("Authorization") != state["auth"]:
                 status, data, headers = 401, {"error": "authentication required"}, {}
             elif self.command in ("PUT", "POST"):

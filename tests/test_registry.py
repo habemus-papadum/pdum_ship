@@ -52,6 +52,7 @@ def test_python_checks_selected_index_and_reports_unknown_auth(registry_server, 
     monkeypatch.setenv("UV_INDEX_PRIVATE_PASSWORD", "wrong")
     assert registry.has(cfg, package, "0.2.0") is None
     assert all(path == "/simple/demo-pkg/" for _, path, _, _ in registry_server["requests"])
+    assert all(agent.startswith("habemus-papadum-ship/") for agent in registry_server["user_agents"])
 
 
 def test_native_uv_credentials_are_read_without_a_second_store(registry_server, tmp_path, monkeypatch):

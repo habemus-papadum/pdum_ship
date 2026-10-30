@@ -22,6 +22,7 @@ from pathlib import Path
 
 from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
 
+from . import __version__
 from .config import Config
 from .packages import Package
 
@@ -174,7 +175,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def _get_json(
     url: str, *, accept: str = "application/json", credentials: tuple[str, str] | None = None
 ) -> tuple[int, dict | None]:
-    headers = {"Accept": accept}
+    headers = {"Accept": accept, "User-Agent": f"habemus-papadum-ship/{__version__}"}
     if credentials:
         headers["Authorization"] = "Basic " + base64.b64encode(":".join(credentials).encode()).decode()
     request = urllib.request.Request(url, headers=headers)
