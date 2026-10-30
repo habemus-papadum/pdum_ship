@@ -66,6 +66,15 @@ def pnpm_lock_versions(pnpm_dir: Path) -> dict[str, frozenset[str]]:
     return {name: frozenset(values) for name, values in versions.items()}
 
 
+def pnpm_lock_registry_packages(pnpm_dir: Path) -> set[str]:
+    """Local npm packages are not registry releases, even under our own scope."""
+    return {
+        name
+        for name, versions in pnpm_lock_versions(pnpm_dir).items()
+        if any(not version.startswith(("file:", "link:", "workspace:")) for version in versions)
+    }
+
+
 def lock_versions(config: Config) -> dict[tuple[str, str], frozenset[str]]:
     return {
         **{("python", name): versions for name, versions in uv_lock_versions(config.root).items()},
@@ -178,7 +187,7 @@ def refresh(
     """
     root = config.root
     before = lock_versions(config)
-    workspace_names = {p.name for p in packages}
+    workspace_names = {p.name for p in projects(config)}
     # Snapshot the exact inputs too: native package-manager behavior must not
     # silently turn a lock refresh into a dependency declaration change.
     manifests = {*_python_manifests(config, packages), *_npm_manifests(config, packages)}
@@ -212,7 +221,7 @@ def refresh(
         if everything:
             commands.append((["pnpm", "update", "-r", "--no-save", "--lockfile-only"], config.pnpm_dir))
         else:
-            names = sorted(n for n in pnpm_lock_versions(config.pnpm_dir) if config.is_ours(n))
+            names = sorted(n for n in pnpm_lock_registry_packages(config.pnpm_dir) if config.is_ours(n))
             if names:
                 commands.append((["pnpm", "update", "-r", "--no-save", "--lockfile-only", *names], config.pnpm_dir))
 
@@ -299,16 +308,25 @@ def dev_link_problems(config: Config, packages: list[Package]) -> list[str]:
                 if isinstance(s, dict) and ("path" in s or s.get("editable")):
                     rel = manifest.relative_to(config.root)
                     problems.append(f"{rel}: [tool.uv.sources] {name} is a path/editable link")
+    catalogs = _npm_catalogs(config)
+    used_catalogs: set[tuple[str, str]] = set()
     for manifest in _npm_manifests(config, packages):
         data = json.loads(manifest.read_text())
         for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
             for name, spec in (data.get(section) or {}).items():
-                if isinstance(spec, str) and (spec.startswith("link:") or spec.startswith("file:")):
-                    rel = manifest.relative_to(config.root)
-                    problems.append(f"{rel}: {section} {name} = {spec!r} is a development link")
-    for group, values in _npm_catalogs(config).items():
+                if isinstance(spec, str) and spec.startswith("catalog:"):
+                    group = spec.removeprefix("catalog:")
+                    used_catalogs.add((group, name))
+                    spec = catalogs.get(group, {}).get(name)
+                if isinstance(spec, str) and spec.startswith(("link:", "file:")):
+                    if not config.allows_local(manifest, name, spec):
+                        rel = manifest.relative_to(config.root)
+                        problems.append(f"{rel}: {section} {name} = {spec!r} is a development link")
+    # A consumer's exception never permits the same catalog entry for another
+    # consumer. Unused catalog links still need removal rather than a broad waiver.
+    for group, values in catalogs.items():
         for name, spec in values.items():
-            if isinstance(spec, str) and spec.startswith(("link:", "file:")):
+            if (group, name) not in used_catalogs and isinstance(spec, str) and spec.startswith(("link:", "file:")):
                 path = (config.pnpm_dir / "pnpm-workspace.yaml").relative_to(config.root)
                 problems.append(f"{path}: catalog:{group} {name} = {spec!r} is a development link")
     return problems
@@ -443,6 +461,8 @@ def marker_problems(repo: Repo, config: Config, packages: list[Package]) -> list
 
     problems: list[str] = []
     for package in packages:
+        if not config.versions(package.name):
+            continue
         tag, last = last_release(repo, package)
         current = read_version(config.root, package)
         expected = (last or ZERO).dev

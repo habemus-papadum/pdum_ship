@@ -11,11 +11,14 @@ every command. This skill says what to do first and what not to do.
 
 ## The model in one paragraph
 
-Each package has its own version and its own tag `<package>-v<version>`.
+Each versioned release package has its own version and its own tag `<package>-v<version>`.
 The tags are the record of releases; between releases the manifest says
 `<last release>+dev`. Consumers declare the repository's own packages with
 floors (`>=X.Y`), never exact pins, and commit their lockfiles; a lockfile
-changes only when a command is asked to change it.
+changes only when a command is asked to change it. `versioning = false` opts
+projects out of version/release operations while retaining dependency operations
+and tests; it is independent of Python installability. `publish = false` retains
+versioning/tagging but prevents upload.
 
 ## What to run
 
@@ -35,7 +38,7 @@ too.
 
 ## Rules an agent follows here
 
-- Never edit a version field by hand. `ship release` owns it; between
+- Never edit a Ship-managed version field by hand. `ship release` owns it; between
   releases it says `<last release>+dev`, and `ship deps check` reports
   anything else.
 - Never publish from this machine. When the task implies a release, ask the
@@ -49,13 +52,12 @@ too.
   floor in this repository.
 - Never pin one of our packages to an exact version without a reason on the
   same line or in `[tool.ship.pins]`.
-- Never commit a development link: a `path` or `editable` entry in
-  `[tool.uv.sources]`, or a `link:`/`file:` dependency in a `package.json`.
-  For a local experiment in Python use
-  `uv run --with-editable ../other/package …`, which edits nothing. In a
-  pnpm workspace there is no equivalent: `pnpm link` writes `link:` into
-  `package.json` and is itself the leak; work inside the workspace, or
-  publish.
+- Reject unapproved development links. Intentional npm `file:`/`link:` dependencies
+  require an exact, reasoned `[[tool.ship.local-dependencies]]` entry for their
+  manifest, dependency and full spec. Exceptions never allow local runtime
+  references in a published artifact. Python path/editable sources remain
+  forbidden; use `uv run --with-editable ../other/package …` for a temporary
+  compatibility check without editing manifests.
 - In a TypeScript library, a dependency whose objects, exception classes or
   types cross the library's public API, or that holds process-wide state, is
   a `peerDependency` with a floor: `>=X.Y.0`, or `workspace:>=X.Y.0` inside

@@ -150,6 +150,8 @@ def _plan_one(
     version: Version | None,
     registry_check: bool,
 ) -> PackagePlan:
+    if not package.publishable or not config.versions(package.name):
+        raise ReleaseError(f"{package.name} is not a release target (private or versioning = false)")
     tag, last = last_release(repo, package)
     manifest_version = read_version(config.root, package)
     base, is_dev = split_dev(manifest_version)
@@ -209,7 +211,7 @@ def plan(
     # Coupled: every package moves to one version, computed from the newest last release.
     if selected is not None:
         raise ReleaseError(f"this repository is coupled ({config.coupled}); `ship release` releases every package")
-    targets = [p for p in packages if config.package(p.name).publish]
+    targets = [p for p in packages if p.publishable and config.versions(p.name) and config.package(p.name).publish]
     if not targets:
         raise ReleaseError("no publishable packages found")
     if version is None:
@@ -301,6 +303,11 @@ def _build(config: Config, item: PackagePlan, say: Say) -> list[Path]:
             data = json.load(manifest) if manifest else {}
         if data.get("name") != package.name or data.get("version") != str(item.version):
             raise ReleaseError("packed npm metadata does not match the planned release")
+        if settings.publish:
+            for section in ("dependencies", "peerDependencies", "optionalDependencies"):
+                for name, spec in (data.get(section) or {}).items():
+                    if isinstance(spec, str) and spec.startswith(("file:", "link:", "workspace:", "catalog:")):
+                        raise ReleaseError(f"packed npm {section} {name} retains a local dependency: {spec!r}")
         return files
     _run(
         ["uv", "build", "--package", package.name, "--out-dir", str(out_dir)],
@@ -356,6 +363,9 @@ def execute(
 ) -> None:
     root = config.root
     items = release_plan.items
+    for item in items:
+        if not item.package.publishable or not config.versions(item.package.name):
+            raise ReleaseError(f"{item.package.name} is not a release target (private or versioning = false)")
     touched: list[Path] = []
     for item in items:
         touched.extend(_version_files(config, item.package))

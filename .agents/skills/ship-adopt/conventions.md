@@ -52,6 +52,30 @@ everywhere and CI needs one setup step for it.
 - `__version__`, if exported, read from the installed metadata:
   `importlib.metadata.version("<distribution>")`.
 
+## Dependency-only and mixed repositories
+
+Choose release participation before applying the release procedures below.
+`[tool.ship] versioning = false` keeps dependency policy, lock refresh and tests
+without version changes, tags or uploads. Keep Python projects installable;
+never set `package = false` just to remove a real library from Ship releases.
+A mixed repository sets `versioning = true` only under the published libraries'
+`[tool.ship.packages."NAME"]` tables. The inverse per-package override also works.
+`publish = false` still means a versioned/tagged package without an upload.
+
+For internal projects, add Ship, its tests, policy CI, hook and synced skills.
+Do not reconstruct baseline tags, rewrite their versions to `+dev`, add a release
+workflow or publish a package merely to demonstrate adoption. Run the ordinary
+project checks and `ship deps check`; use a refresh dry run to inspect dependency
+update selection. Apply the remaining release steps only to versioned libraries.
+Independent experiment environments outside the configured workspaces stay separate.
+
+Intentional npm local dependencies can have exact, reasoned
+`[[tool.ship.local-dependencies]]` entries; see the README's **Internal projects
+and local dependencies** section. Preserve the repository's explicit vendor
+restoration process and test it in a fresh checkout. An exception changes source
+policy only; a package configured to publish still cannot ship local runtime
+references in its packed metadata. Python path/editable links remain disallowed.
+
 ## Adopting ship in a uv repository
 
 Prerequisites: on `main` with `HEAD` equal to `origin/main`, CI green on
@@ -624,8 +648,9 @@ no longer apply.
 Put this, adapted to the repository's instruction style, where agents will
 read it:
 
-> `ship` (habemus-papadum-ship) releases this repository's packages. Each
-> package has its own version and tag; between releases the manifest says
+> `ship` (habemus-papadum-ship) manages this repository's dependencies and
+> selected package releases. Projects with `versioning = false` retain their
+> versions and are never released. Each versioned package has its own version and tag; between releases the manifest says
 > `<last release>+dev`. Never edit a version field by hand. To release, ask
 > the operator; when they agree, run the release workflow
 > (`gh workflow run release.yml -f package=<name> -f bump=minor -f dry_run=false`,
@@ -637,5 +662,7 @@ read it:
 > packages, raise that package's floor here. Do not pin one of our packages
 > to an exact version without a reason on the same line or in
 > `[tool.ship.pins]`. Never commit a `path` or `editable` entry in
-> `[tool.uv.sources]`, or a `link:`/`file:` dependency (`pnpm link` writes
-> one). Run `uv run ship deps check` before you finish.
+> `[tool.uv.sources]`, or an unapproved npm `link:`/`file:` dependency. An
+> intentional npm local dependency needs an exact, reasoned
+> `[[tool.ship.local-dependencies]]` exception. Published runtime metadata
+> must not retain local references. Run `uv run ship deps check` before you finish.

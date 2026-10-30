@@ -65,6 +65,10 @@ ignore-subjects = ["back to dev"]
 branch = "main"
 remote = "origin"
 
+# Manage package versions and releases. False keeps dependency operations only.
+# Individual packages can override this repository default. Default true.
+versioning = true
+
 # Create a GitHub release for each tag when `gh` is installed. Default true.
 github-release = true
 
@@ -85,6 +89,7 @@ pnpm-root = "widgets"
 "@scope/old-lib" = "needs the v1 schema until the importer is rewritten"
 
 [tool.ship.packages."my-package"]
+versioning = true           # inherits [tool.ship] versioning when omitted
 tag = "my-package"          # tag component; default: the unscoped name
 test = ["uv run --locked pytest packages/my-package"]
 publish = true               # false: version and tag, never upload
@@ -101,8 +106,61 @@ build = true
 `[tool.uv.workspace]` member that has a `[project]` table and is not
 `package = false`; the `package.json` of the pnpm workspace root (the
 repository root, or `pnpm-root`) and every `pnpm-workspace.yaml` member that
-is not `"private": true`. For a scoped npm package the tag component is the
+is not `"private": true`. Release selection additionally requires `versioning = true`. For a scoped npm package the tag component is the
 unscoped name (`@scope/core` tags as `core-v1.2.0`).
+
+## Internal projects and local dependencies
+
+Set `[tool.ship] versioning = false` for a repository that uses Ship only to
+check and refresh dependencies. Version fields stay untouched; there are no
+release-marker checks, release tags or uploads. Python projects remain normally
+installable (`package = true`); private npm projects stay private.
+`ship packages`, `ship changed` and `ship release` select only versioned release
+packages. Dependency operations still inspect every configured workspace project,
+check registry publication times and run its configured tests after a refresh.
+Independently locked projects outside those workspaces are not discovered.
+
+Mixed repositories can opt individual libraries into releases:
+
+```toml
+[tool.ship]
+ours = ["example-*", "@example/*"]
+versioning = false
+
+[tool.ship.packages."example-library"]
+versioning = true
+```
+
+Conversely, a repository with the default `versioning = true` can turn it off
+for one package. npm's `private = true` and uv's `package = false` always exclude
+a project from releases, even with `versioning = true`. Existing `publish = false`
+keeps its separate meaning: version, build and tag the package, but never upload
+it. It does not disable versioning.
+
+Local npm dependencies are rejected by default. An intentional vendored package
+can have an exact exception in the root `pyproject.toml`:
+
+```toml
+[[tool.ship.local-dependencies]]
+manifest = "sites/experiment/package.json"
+dependency = "@vendor/tool"
+spec = "file:../../vendor/tool"
+reason = "Pinned upstream build retained for the internal experiment"
+```
+
+The exception requires all four fields and matches the repository-relative
+manifest path, dependency name and full `file:` or `link:` specifier without
+globs. Catalog aliases resolve before matching, so another consumer of the same
+catalog entry needs its own exception. An unused local catalog entry remains an
+error. This is an explicit source-policy exception, not a promise that the
+referenced files exist or can be restored in CI; the repository owns that check.
+Python path/editable links remain rejected.
+
+For packages configured to publish, the packed npm artifact must not retain
+`file:`, `link:`, `workspace:` or `catalog:` runtime, optional or peer dependencies.
+A source-policy exception cannot bypass that artifact check. `publish = false`
+packages may retain their explicitly permitted local dependencies because they
+are not uploaded. Ordinary dependency refresh does not update vendored code.
 
 ## Commands
 
@@ -189,14 +247,14 @@ two ecosystems.
 
 Reports, and exits 1 on any of:
 
-- a `path` or `editable` entry in `[tool.uv.sources]`, or a `link:`/`file:`
+- a `path` or `editable` entry in `[tool.uv.sources]`, or an unapproved `link:`/`file:`
   dependency in a `package.json` (a development link);
 - a stale lockfile (`uv lock --check`; `pnpm install --frozen-lockfile`);
 - an exact pin on one of our packages without a reason;
 - a `peerDependencies` range on one of our packages written as `^`, `~`,
   `*`, `workspace:^`, `workspace:~` or `workspace:*` (write `>=X.Y.0` or
   `workspace:>=X.Y.0`);
-- a manifest version that is not `<last tag>+dev`;
+- a versioned release package whose manifest version is not `<last tag>+dev`;
 - a missing catalog reference, or a first-party pin/cap in the default or named
   pnpm catalogs without a reason; peer ranges are checked after resolving
   `catalog:` aliases. Catalog development links are also rejected by the hook;

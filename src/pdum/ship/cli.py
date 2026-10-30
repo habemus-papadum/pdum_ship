@@ -70,10 +70,10 @@ def version() -> None:
 
 @app.command(name="packages")
 def list_packages() -> None:
-    """List the publishable packages, their manifest versions and their last tags."""
+    """List the versioned release packages, their manifest versions and their last tags."""
     repo, cfg, pkgs = _load()
     if not pkgs:
-        say("no publishable packages found")
+        say("no versioned release packages found")
         return
     for p in pkgs:
         tag, _ = release.last_release(repo, p)

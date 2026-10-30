@@ -55,7 +55,7 @@ def unscoped(name: str) -> str:
 
 def discover(config: Config) -> list[Package]:
     """The release inventory; dependency operations use ``projects`` instead."""
-    found = [p for p in projects(config) if p.publishable]
+    found = [p for p in projects(config) if p.publishable and config.versions(p.name)]
     names = [p.name for p in found]
     duplicates = {n for n in names if names.count(n) > 1}
     if duplicates:

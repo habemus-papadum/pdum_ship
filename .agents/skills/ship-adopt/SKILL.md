@@ -17,6 +17,14 @@ root `pyproject.toml` the procedure adds exists to install it.
 
 ## Before you start
 
+First decide which projects need releases. For dependency-only management use
+`versioning = false`; keep Python installability and existing version fields.
+Mixed repos opt published packages into versioning. The conventions' dependency-only
+procedure skips baseline tags, version rewrites and release workflows for internal
+projects. Use an exact, reasoned local-dependency exception for intentional npm
+vendor references; do not silently remove a valid experiment arrangement.
+
+
 1. Confirm the operator wants this repository on ship now. Adoption deletes
    release scripts, re-tags history and changes how versions are written.
 2. Find the last release: the highest existing tag and the version it

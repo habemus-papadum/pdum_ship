@@ -20,6 +20,7 @@ class ConfigError(ValueError):
 class PackageConfig:
     """Per-package overrides under ``[tool.ship.packages."<name>"]``."""
 
+    versioning: bool | None = None
     tag: str | None = None
     test: list[str] | None = None
     publish: bool = True
@@ -31,9 +32,21 @@ class PackageConfig:
 
 
 @dataclass(frozen=True)
+class LocalDependency:
+    """One intentional npm local dependency, matched without globs."""
+
+    manifest: str
+    dependency: str
+    spec: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class Config:
     root: Path
     ours: list[str]
+    versioning: bool = True
+    local_dependencies: list[LocalDependency] = field(default_factory=list)
     shared_paths: list[str] = field(default_factory=list)
     ignore_paths: list[str] = field(default_factory=list)
     ignore_subjects: list[str] = field(default_factory=list)
@@ -69,6 +82,17 @@ class Config:
             for pattern in self.ours
         )
 
+    def versions(self, name: str) -> bool:
+        override = self.package(name).versioning
+        return self.versioning if override is None else override
+
+    def allows_local(self, manifest: Path, dependency: str, spec: str) -> bool:
+        relative = manifest.relative_to(self.root).as_posix()
+        return any(
+            (entry.manifest, entry.dependency, entry.spec) == (relative, dependency, spec)
+            for entry in self.local_dependencies
+        )
+
     def package(self, name: str) -> PackageConfig:
         return self.packages.get(name, PackageConfig())
 
@@ -89,6 +113,37 @@ def load(root: Path) -> Config:
     if not isinstance(ours, list) or not ours:
         raise ConfigError("[tool.ship] needs `ours`, a non-empty list of package name patterns.")
 
+    versioning = table.get("versioning", True)
+    if not isinstance(versioning, bool):
+        raise ConfigError("[tool.ship] `versioning` must be true or false.")
+    local_dependencies: list[LocalDependency] = []
+    entries = table.get("local-dependencies", [])
+    if not isinstance(entries, list):
+        raise ConfigError("[[tool.ship.local-dependencies]] must be an array of tables.")
+    seen: set[tuple[str, str, str]] = set()
+    for entry in entries:
+        keys = {"manifest", "dependency", "spec", "reason"}
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != keys
+            or not all(isinstance(entry[key], str) and entry[key].strip() for key in keys)
+        ):
+            raise ConfigError(
+                "Each local-dependencies entry needs exactly manifest, dependency, spec and reason strings."
+            )
+        manifest = Path(entry["manifest"])
+        if manifest.is_absolute() or ".." in manifest.parts or manifest.name != "package.json":
+            raise ConfigError("A local-dependencies manifest must name a repository-relative package.json.")
+        if manifest.as_posix() != entry["manifest"] or any(c in entry["manifest"] for c in "*?[]"):
+            raise ConfigError("A local-dependencies manifest must be a normalized exact path, without globs.")
+        if not entry["spec"].startswith(("file:", "link:")) or not entry["spec"].partition(":")[2]:
+            raise ConfigError("A local-dependencies spec must be an exact file: or link: dependency.")
+        identity = (entry["manifest"], entry["dependency"], entry["spec"])
+        if identity in seen:
+            raise ConfigError("Duplicate local-dependencies entry.")
+        seen.add(identity)
+        local_dependencies.append(LocalDependency(**entry))
+
     coupled = table.get("coupled")
     if coupled is not None and not isinstance(coupled, str):
         raise ConfigError("[tool.ship] `coupled` must be a string giving the reason, or absent.")
@@ -97,6 +152,9 @@ def load(root: Path) -> Config:
     for name, raw in table.get("packages", {}).items():
         if not isinstance(raw, dict):
             raise ConfigError(f'[tool.ship.packages."{name}"] must be a table.')
+        package_versioning = raw.get("versioning")
+        if "versioning" in raw and not isinstance(package_versioning, bool):
+            raise ConfigError(f'[tool.ship.packages."{name}"] `versioning` must be true or false.')
         build = raw.get("build", True)
         if not isinstance(build, bool):
             raise ConfigError(f'[tool.ship.packages."{name}"] `build` must be true or false.')
@@ -108,6 +166,7 @@ def load(root: Path) -> Config:
         if not isinstance(before_build, list) or not all(isinstance(c, str) for c in before_build):
             raise ConfigError(f'[tool.ship.packages."{name}"] `before-build` must be a list of shell commands.')
         packages[name] = PackageConfig(
+            versioning=package_versioning,
             tag=raw.get("tag"),
             test=raw.get("test"),
             publish=raw.get("publish", True) and build,
@@ -133,6 +192,8 @@ def load(root: Path) -> Config:
     return Config(
         root=root,
         ours=list(ours),
+        versioning=versioning,
+        local_dependencies=local_dependencies,
         shared_paths=list(table.get("shared-paths", [])),
         ignore_paths=list(table.get("ignore-paths", [])),
         ignore_subjects=list(table.get("ignore-subjects", [])),

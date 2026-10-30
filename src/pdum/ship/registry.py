@@ -315,10 +315,10 @@ def check_timestamps(config: Config) -> list[str]:
                 if status == 200 and data
                 else [f"{name}: could not verify private Python index publication times"]
             )
-    from .deps import pnpm_lock_versions
+    from .deps import pnpm_lock_registry_packages
 
     scopes = {}
-    for name in pnpm_lock_versions(config.pnpm_dir):
+    for name in pnpm_lock_registry_packages(config.pnpm_dir):
         if not config.is_ours(name):
             continue
         scope = name.split("/")[0] if name.startswith("@") else ""

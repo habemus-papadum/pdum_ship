@@ -27,8 +27,10 @@ publishing disabled.
 - Never publish from your own machine. To release, ask the operator; when they agree,
   run the repository's release workflow (`gh workflow run release.yml -f package=NAME
   -f bump=minor -f dry_run=false`).
-- Never commit a `path` or `editable` entry in `[tool.uv.sources]`, or a `link:` or
-  `file:` dependency in a `package.json`.
+- Never commit a `path` or `editable` entry in `[tool.uv.sources]`, or an unapproved
+  `link:`/`file:` dependency in a `package.json`. Intentional npm vendor references
+  need an exact, reasoned `[[tool.ship.local-dependencies]]` exception. Published
+  runtime metadata must remain free of local references.
 - Do not update repositories that consume a package you changed; their scheduled
   refresh does that. The one exception: if your change needs a newer release of
   another of our packages, raise that package's floor in this repository.
