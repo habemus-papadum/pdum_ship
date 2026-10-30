@@ -255,6 +255,10 @@ fails the job even though its output is copied into the step summary. These
 workflow fixes apply to callers using `release.yml@main` without upgrading
 their locked CLI or changing their permissions.
 
+A Python-only repository whose tests need Node/pnpm can pass `setup_pnpm: true`;
+ship’s own dispatch enables this and uses pnpm 11, matching its CI. Tests run
+with isolated native credential stores and no inherited publish credentials.
+
 The workflow sets the git identity, installs the
 repository with `uv sync --locked`, exports the tokens, and runs
 `uv run ship release`. For a pnpm workspace it installs pnpm and Node — the

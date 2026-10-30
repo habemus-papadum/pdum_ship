@@ -206,3 +206,18 @@ def test_private_auth_setup_preserves_scope_routing_and_keeps_secrets_in_env(tmp
     assert "registry=" not in text
     assert "//packages.example/npm/:_auth=${NPM_BASIC_AUTH}" in text
     assert "synthetic-secret-value" not in text
+
+
+def test_ship_self_release_provisions_pnpm_without_a_node_workspace(tmp_path):
+    events = WORKFLOW.get("on", WORKFLOW.get(True))
+    default = events["workflow_dispatch"]["inputs"]["setup_pnpm"]["default"]
+    detect = next(step for step in JOB["steps"] if step.get("id") == "pnpm")
+    script = detect["run"].replace("${{ inputs.setup_pnpm }}", str(default).lower())
+    (tmp_path / "pyproject.toml").write_text('[tool.ship]\nours=["demo-*"]\n')
+    output = tmp_path / "outputs"
+    subprocess.run(
+        ["bash", "-e", "-c", script], cwd=tmp_path, env={**os.environ, "GITHUB_OUTPUT": str(output)}, check=True
+    )
+    values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    assert values["present"] == "true" and values["pinned"] == "false"
+    assert "locked" not in values

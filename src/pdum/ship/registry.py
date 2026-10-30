@@ -154,6 +154,11 @@ def _credentials(target: PythonRegistry) -> tuple[str, str] | None:
 def python_publish_env(config: Config) -> dict[str, str]:
     target = python_target(config)
     env = dict(os.environ)
+    # GitHub supplies an empty string for an absent optional secret. uv treats
+    # an empty USERNAME/PASSWORD variable as an option, conflicting with TOKEN.
+    for key in ("UV_PUBLISH_USERNAME", "UV_PUBLISH_PASSWORD", "UV_PUBLISH_TOKEN"):
+        if not env.get(key):
+            env.pop(key, None)
     if env.get("UV_PUBLISH_TOKEN") or env.get("UV_PUBLISH_PASSWORD"):
         return env
     if target.index_url != PYPI_INDEX:

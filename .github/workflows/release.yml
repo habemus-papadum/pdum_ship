@@ -46,7 +46,11 @@ on:
       pnpm_version:
         description: pnpm version to install when package.json pins none in packageManager
         type: string
-        default: "latest"
+        default: "11"
+      setup_pnpm:
+        description: Install Node and pnpm for ship's cross-ecosystem tests
+        type: boolean
+        default: true
       npm_registry:
         description: Registry for npm credentials (publishConfig and scope mappings select packages)
         type: string
@@ -93,6 +97,10 @@ on:
         description: pnpm version to install when package.json pins none in packageManager
         type: string
         default: "latest"
+      setup_pnpm:
+        description: Install Node and pnpm even without a pnpm workspace (for tests)
+        type: boolean
+        default: false
       npm_registry:
         description: Registry for npm credentials (publishConfig and scope mappings select packages)
         type: string
@@ -157,11 +165,12 @@ jobs:
           # The workspace is the repository root unless [tool.ship] pnpm-root names a subdirectory.
           root=$(python3 -c 'import tomllib; t = tomllib.load(open("pyproject.toml", "rb")); print(t.get("tool", {}).get("ship", {}).get("pnpm-root", "."))')
           echo "root=$root" >> "$GITHUB_OUTPUT"
-          if [ -f "$root/pnpm-workspace.yaml" ] || [ -f "$root/package.json" ]; then
+          if [ -f "$root/pnpm-workspace.yaml" ] || [ -f "$root/package.json" ] || [ "${{ inputs.setup_pnpm }}" = "true" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
+          if [ -f "$root/pnpm-lock.yaml" ]; then echo "locked=true" >> "$GITHUB_OUTPUT"; fi
           # pnpm/action-setup needs a version: from package.json's packageManager when the
           # repository pins one, otherwise from the pnpm_version input.
           if [ -f "$root/package.json" ] && grep -q '"packageManager"' "$root/package.json"; then
@@ -184,14 +193,14 @@ jobs:
         if: steps.pnpm.outputs.present == 'true' && hashFiles('.nvmrc') != ''
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          cache: ${{ steps.pnpm.outputs.locked == 'true' && 'pnpm' || '' }}
           cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
           registry-url: ${{ inputs.npm_registry }}
       - uses: actions/setup-node@v5
         if: steps.pnpm.outputs.present == 'true' && hashFiles('.nvmrc') == ''
         with:
           node-version: ${{ inputs.node_version }}
-          cache: pnpm
+          cache: ${{ steps.pnpm.outputs.locked == 'true' && 'pnpm' || '' }}
           cache-dependency-path: ${{ steps.pnpm.outputs.root }}/pnpm-lock.yaml
           registry-url: ${{ inputs.npm_registry }}
 

@@ -57,7 +57,7 @@ class DemoRepo:
 
 
 @pytest.fixture(autouse=True)
-def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+def _git_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIT_AUTHOR_NAME", "ship tests")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "ship@example.invalid")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "ship tests")
@@ -67,6 +67,31 @@ def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
     # The throwaway projects have their own environments; ship's own must not leak in.
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    # These tests run in the release job too. Never let its real publishing
+    # credentials or OIDC capability reach a synthetic registry or its logs.
+    for name in list(os.environ):
+        if name.startswith(("UV_PUBLISH_", "UV_INDEX_", "ACTIONS_ID_TOKEN_")) or name in {
+            "NODE_AUTH_TOKEN",
+            "NPM_TOKEN",
+            "NPM_BASIC_AUTH",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "UV_INDEX",
+            "UV_DEFAULT_INDEX",
+            "UV_EXTRA_INDEX_URL",
+            "UV_CONFIG_FILE",
+            "UV_PREVIEW_FEATURES",
+            "UV_KEYRING_PROVIDER",
+            "npm_config_userconfig",
+        }:
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("UV_CREDENTIALS_DIR", str(tmp_path / "uv-credentials"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for variable, filename in (("NETRC", "netrc"), ("NPM_CONFIG_USERCONFIG", "npmrc")):
+        path = tmp_path / filename
+        path.write_text("")
+        path.chmod(0o600)
+        monkeypatch.setenv(variable, str(path))
 
 
 def _init_repo(root: Path, origin: Path) -> DemoRepo:

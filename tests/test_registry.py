@@ -315,3 +315,12 @@ def test_dependency_checks_do_not_repurpose_publish_credentials(tmp_path, monkey
 
     monkeypatch.setattr(registry, "python_metadata", metadata)
     assert registry.check_timestamps(cfg) == []
+
+
+def test_empty_optional_publish_credentials_do_not_conflict_with_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("UV_PUBLISH_USERNAME", "")
+    monkeypatch.setenv("UV_PUBLISH_PASSWORD", "")
+    monkeypatch.setenv("UV_PUBLISH_TOKEN", "synthetic-token")
+    env = registry.python_publish_env(Config(root=tmp_path, ours=["demo-*"]))
+    assert env["UV_PUBLISH_TOKEN"] == "synthetic-token"
+    assert "UV_PUBLISH_USERNAME" not in env and "UV_PUBLISH_PASSWORD" not in env
