@@ -143,3 +143,28 @@ All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
 - The conventions recommend the `repo: local` hook form since 0.6.0 (runs
   the ship pinned in `uv.lock`; nothing to bump on a ship release).
   `pdum_aws` and `cf_browser_credentials` use it.
+
+
+## Weekly integration checkpoint, November 10, 2026
+
+Ship 0.12.0 adds independently selected `refresh-test` commands, `deps verify`,
+retained candidate diagnostics before ordinary rollback, and the shared refresh
+action. Passing candidates commit locks/generated skills and explicitly dispatch
+CI; failed resolved candidates open draft PRs while the job stays failed. Existing
+candidate work is preserved. Reports/commits have explicit file scopes, and remote
+advances never trigger a force push to the default branch.
+
+[Source CI](https://github.com/habemus-papadum/pdum_ship/actions/runs/42859880115),
+[release dry run](https://github.com/habemus-papadum/pdum_ship/actions/runs/42859903114)
+and [0.12.0 publication](https://github.com/habemus-papadum/pdum_ship/actions/runs/42860453312)
+passed all 158 tests. An isolated PyPI installation verified the new commands,
+configuration and bundled docs. The reviewed composite action revision is
+`132af447b7055d512049f38cab45ab0da1585705`.
+
+The [controlled GitHub transport check](https://github.com/habemus-papadum/pdum_ship/actions/runs/42859986953)
+created a real draft PR for a deliberately failed synthetic candidate against
+run-specific disposable refs, verified it and removed only those refs/PR. It
+never changed main. The [manual weekly self-run](https://github.com/habemus-papadum/pdum_ship/actions/runs/42859993360)
+passed baseline verification and reported unchanged locks without a commit.
+Consumer rollouts exercise real first-party upgrades under their own authentication
+and maintained-test policies. No publishing or deployment is part of refresh.
