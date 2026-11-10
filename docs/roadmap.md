@@ -129,8 +129,9 @@ All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
 - `ship deps refresh` ran for real on 2026-10-29 in `pdum_aws`. One run asked
   uv to upgrade only `habemus-papadum-ship` and came back with jupyterlab
   downgraded 4.6.2 → 3.6.8 and sixteen other packages churned; it did not
-  reproduce and is unexplained. Since 0.5.0 a refresh that downgrades or
-  removes a third-party package fails and restores the lockfiles. Ship 0.12.0 adds the shared weekly action, candidate retention and independently
+  reproduce and is unexplained. The original 0.5.0 guard rejected third-party downgrades and removals.
+  Version 0.12.1 retains the downgrade check but permits normal obsolete-transitive
+  pruning after resolution, with locked installation and verification. Ship 0.12.0 adds the shared weekly action, candidate retention and independently
   selected maintenance checks; consumer rollout evidence is recorded by the operator.
 - A release is visible to `uv lock --upgrade-package` only once PyPI's JSON
   simple index has it, a few minutes after the HTML page; a refresh run right
@@ -184,3 +185,12 @@ including the created PR URL and the original rejection phase/reason. A failed
 update remains a failed workflow even when its draft is created successfully.
 Historical permission failures and later successful recovery runs remain distinct;
 PR CI can also require GitHub approval before it starts.
+
+
+The correction shipped as **0.12.1** through
+[release 42895623852](https://github.com/habemus-papadum/pdum_ship/actions/runs/42895623852).
+All 160 tests, source CI and the real GitHub draft-PR smoke passed. Fai-design's
+reviewed candidate passed its full package/type/build and fresh-install checks,
+merged in PR #1, and its resumed weekly run passed without changes. Analog's
+reviewed candidate likewise passed its managed checks and CI and merged in PR #1.
+Both consumers pin the updated action; no application runtime source was repaired.
