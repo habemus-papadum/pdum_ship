@@ -26,6 +26,7 @@ versioning/tagging but prevents upload.
 | --- | --- |
 | Which packages exist, at what version, last tag | `uv run ship packages` |
 | What changed since each package's last release | `uv run ship changed` |
+| Run its selected maintenance checks without changing locks | `uv run ship deps verify` |
 | Is the repository within policy | `uv run ship deps check` |
 | Plan a release without writing anything | `uv run ship release <package> --bump minor --dry-run` |
 | Move the lockfile to the newest releases of our packages, then test | `uv run ship deps refresh` |
@@ -79,3 +80,13 @@ too.
 
 Configuration reference, the release steps in order, the changed-detection
 rule and the failure behaviour are all in [the README](README.md).
+
+
+## Weekly maintenance
+
+Use the README's weekly integration procedure for scheduled/manual refreshes.
+`refresh-test` selects maintained checks independently of release tests. A refresh
+report can retain candidate locks before rollback; use its recorded source commit
+for reproduction, not a fresh unbounded resolution. Passing updates commit only
+locks and generated Ship skill copies; failed candidates need investigation in
+their draft PR. Preserve existing agent/human PR work and never force-push main.

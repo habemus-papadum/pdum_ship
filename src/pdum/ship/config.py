@@ -55,6 +55,7 @@ class Config:
     remote: str = "origin"
     github_release: bool = True
     test: list[str] | None = None
+    refresh_test: list[str] | None = None
     pins: dict[str, str] = field(default_factory=dict)
     packages: dict[str, PackageConfig] = field(default_factory=dict)
     # Directory of the pnpm workspace relative to the repository root; "." by default.
@@ -174,6 +175,14 @@ def load(root: Path) -> Config:
             before_build=list(before_build),
         )
 
+    refresh_test = table.get("refresh-test")
+    if refresh_test is not None and (
+        not isinstance(refresh_test, list)
+        or not refresh_test
+        or not all(isinstance(command, str) and command.strip() for command in refresh_test)
+    ):
+        raise ConfigError("[tool.ship] refresh-test must be a non-empty list of test commands.")
+
     pins = table.get("pins", {})
     if not isinstance(pins, dict) or not all(isinstance(v, str) for v in pins.values()):
         raise ConfigError("[tool.ship.pins] maps a package name to the reason it is pinned.")
@@ -202,6 +211,7 @@ def load(root: Path) -> Config:
         remote=table.get("remote", "origin"),
         github_release=bool(table.get("github-release", True)),
         test=table.get("test"),
+        refresh_test=list(refresh_test) if refresh_test is not None else None,
         pins=dict(pins),
         packages=packages,
         pnpm_root=pnpm_root,

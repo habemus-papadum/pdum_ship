@@ -76,6 +76,10 @@ github-release = true
 # package's `uv run --locked pytest` or `pnpm --filter <name> test`.
 test = ["uv run --locked pytest", "pnpm -r test"]
 
+# Optional maintenance-only checks; replaces the default refresh test selection,
+# without changing package release tests. A non-empty command list is required.
+# refresh-test = ["uv run --locked pytest tests/unit", "pnpm test:maintenance"]
+
 # Directory of the pnpm workspace when it is not the repository root. ship
 # reads its pnpm-workspace.yaml and package.json, runs pnpm there and commits
 # its pnpm-lock.yaml; the reusable workflow reads the same setting. Default ".".
@@ -219,7 +223,7 @@ subject starts with an entry of `ignore-subjects`.
 
 Lists the discovered packages with their manifest versions and last tags.
 
-### `ship deps refresh [--all]`
+### `ship deps refresh [--all] [--report-dir PATH]`
 
 Upgrades our packages in the lockfiles to their newest releases:
 `uv lock --upgrade-package <name>` for each of our packages found in
@@ -242,6 +246,28 @@ repository `test` command runs even when nothing is publishable. A changed
 lockfile always triggers installation and tests, including metadata-only changes;
 the version table retains every version of a dependency and distinguishes the
 two ecosystems.
+
+`[tool.ship] refresh-test = ["command", ...]` explicitly selects maintenance
+checks without changing release tests. If omitted, the existing repository and
+project test selection applies. `ship deps verify` runs those same maintenance
+commands against the currently installed environment, useful for establishing a
+baseline before an update. Neither command decides which experiments are maintained;
+the repository owns that scope.
+
+With `--report-dir PATH`, Ship writes `refresh.json`, the exact candidate lockfiles
+and `candidate.patch` before installation/tests. A failure still restores the
+original locks and declarations; the report retains the candidate for reproduction.
+Resolution failure has no valid candidate. The directory must be empty and should
+be outside tracked source (for example a temporary directory). Reports include
+source commit, phase, attempted versions and whether tests were requested; no
+credentials or environment dump is included. Tests/install may not silently
+change the resolved lock graph. Diagnostic write failures do not prevent rollback.
+
+### `ship deps verify`
+
+Run the configured maintenance checks without refreshing dependencies. Install the
+committed environment with `uv sync --locked` / `pnpm install --frozen-lockfile`
+first. This command does not publish, tag or commit anything.
 
 ### `ship deps check [--hook]`
 
@@ -337,6 +363,64 @@ version in `.nvmrc` when the repository has one, otherwise the
 reads `NODE_AUTH_TOKEN`; `pnpm publish` runs with `--provenance`. Publishing
 authenticates with the tokens; switching a repository to trusted publishing
 changes only that step.
+
+## Weekly dependency integration
+
+Each consumer owns a weekly/manual workflow. No central integration repository or
+version catalog is required. Use the shared `.github/actions/refresh` composite
+after preparing native authentication and the repository's uv/Node/pnpm versions.
+The [caller example](conventions.md#weekly-dependency-workflow) shows permissions,
+concurrency and triggers. Ship itself exercises it in `weekly-deps.yml`.
+
+The action performs these steps:
+
+1. Require a clean checkout on the configured branch at its current remote head.
+   An open `ship/deps-refresh` PR or an existing candidate branch stops further
+   automatic updates, preserving agent/human work for review.
+2. Install committed locks, require a dispatchable CI workflow, run policy and
+   `ship deps verify`. A baseline failure is reported without inventing an update PR.
+3. Refresh first-party packages and retain candidate diagnostics. The action
+   defers tests in this one command so it can synchronize newly upgraded Ship
+   skill copies before running candidate policy and **the same maintenance checks**.
+   Tests are not bypassed. Ordinary local refresh continues to run tests itself.
+4. If no lockfile changed, finish without generating skills or committing.
+   On a passing candidate, commit only lockfiles and known generated Ship skill
+   copies. Recheck the remote head and perform a normal, non-force push. A branch
+   advance fails the run instead of rebasing untested changes. The workflow then
+   explicitly dispatches its configured CI workflow on the branch.
+5. If a valid resolved candidate fails installation, policy or maintenance checks,
+   push it to the dedicated candidate branch and open a draft PR with the base SHA,
+   version changes and run URL. The job remains failed. Resolution/authentication
+   failures without a valid candidate produce reports, not fabricated PRs.
+
+The shared action requires `contents: write`, `pull-requests: write` and
+`actions: write`. The repository/organization must allow Actions to create PRs.
+A denied PR creation leaves the candidate branch and artifacts intact and fails
+visibly. Existing candidate branches are never overwritten; new branch creation
+uses an absent-ref lease. A human or agent closes/merges the PR and removes its
+branch when finished. Baseline/report failures likewise remain failed.
+
+GitHub token pushes do not trigger ordinary push workflows, so the configured
+`ci_workflow` (default `ci.yml`) must support `workflow_dispatch`. Only that CI is
+dispatched: package releases, documentation publishing and deployments are not
+triggered by this action. The caller must use its normal checkout GitHub token
+for pushes, not a broadly privileged personal token that would trigger extra
+push workflows. The caller also shares the release concurrency group to avoid
+racing version commits.
+
+The action writes diagnostics to `.ship-refresh` by default (`report_dir` input).
+Only a validated repository-relative report directory is uploaded, including on
+failure. Existing paths, checkout roots and symlink escapes are refused. Ignore
+that directory for local inspection, or use fresh checkouts. Artifacts are retained
+for fourteen days; run logs remain the authoritative native command output.
+
+To reproduce locally, use a clean checkout, native registry login and the same
+toolchain/locks, then `ship deps check`, `ship deps verify`, and
+`ship deps refresh --report-dir /tmp/unique-refresh-report`. Apply a retained
+candidate patch to its recorded source commit for an exact failing graph, install
+locked dependencies, sync Ship skills and rerun policy/maintenance verification.
+A failed refresh changes neither minimum requirements nor the committed baseline.
+Third-party updates remain an explicit `--all` operation, not this weekly action.
 
 ## Private registries
 

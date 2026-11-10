@@ -1,0 +1,31 @@
+name: Refresh with ship
+description: Verify first-party lock updates, commit passing candidates, and preserve failed candidates in draft PRs.
+inputs:
+  ci_workflow:
+    description: Workflow to dispatch after a successful lockfile commit
+    default: ci.yml
+  report_dir:
+    description: Repository-relative directory for this run's diagnostics
+    default: .ship-refresh
+runs:
+  using: composite
+  steps:
+    - name: Refresh and verify dependencies
+      id: refresh
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        SHIP_CI_WORKFLOW: ${{ inputs.ci_workflow }}
+        SHIP_REPORT_DIR: ${{ inputs.report_dir }}
+        SHIP_ACTION_PATH: ${{ github.action_path }}
+      run: python3 "$SHIP_ACTION_PATH/refresh.py"
+    - name: Preserve refresh diagnostics
+      if: ${{ always() && steps.refresh.outputs.report_dir != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ship-refresh-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.refresh.outputs.report_dir }}
+        include-hidden-files: true
+        if-no-files-found: ignore
+        retention-days: 14

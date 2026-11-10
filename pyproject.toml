@@ -49,6 +49,7 @@ dev = [
 [tool.ship]
 ours = ["habemus-papadum-*", "@habemus-papadum/*"]
 shared-paths = [".github/workflows/**"]
+refresh-test = ["uv run --locked ruff check .", "uv run --locked pytest -q"]
 
 [tool.ruff]
 target-version = "py312"

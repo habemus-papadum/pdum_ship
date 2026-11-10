@@ -175,6 +175,9 @@ def deps_refresh(
     ] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Print the commands; change nothing")] = False,
     no_test: Annotated[bool, typer.Option("--no-test", help="Do not run the tests after refreshing")] = False,
+    report_dir: Annotated[
+        Path | None, typer.Option(help="Save refresh diagnostics and candidate locks before rollback")
+    ] = None,
     allow_downgrades: Annotated[
         bool,
         typer.Option(
@@ -198,6 +201,7 @@ def deps_refresh(
             dry_run=dry_run,
             allow_downgrades=allow_downgrades,
             say=say,
+            report_dir=report_dir,
         )
     except deps.RefreshError as exc:
         fail(str(exc))
@@ -217,6 +221,16 @@ def deps_refresh(
         say(f"{len(others)} third-party package(s) moved with ours (new or raised requirements)")
     say("")
     say("the lockfile is updated and not committed")
+
+
+@deps_app.command(name="verify")
+def deps_verify() -> None:
+    """Run maintenance checks against the currently installed locked environment."""
+    _, cfg, _ = _load()
+    try:
+        deps.verify(cfg, say)
+    except deps.RefreshError as exc:
+        fail(str(exc))
 
 
 @deps_app.command(name="check")

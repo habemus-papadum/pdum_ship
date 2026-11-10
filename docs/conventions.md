@@ -666,3 +666,58 @@ read it:
 > intentional npm local dependency needs an exact, reasoned
 > `[[tool.ship.local-dependencies]]` exception. Published runtime metadata
 > must not retain local references. Run `uv run ship deps check` before you finish.
+
+
+## Weekly dependency workflow
+
+After adoption, give each maintained workspace one lockfile refresh job. Select
+`[tool.ship] refresh-test` deliberately when experimental projects must not gate
+maintenance; this is separate from package-specific release tests. Use a non-empty
+list with real checks. Existing native registry login and toolchain preparation
+precede this shared action; no publication credentials belong in its arguments.
+
+```yaml
+name: weekly dependencies
+on:
+  schedule:
+    - cron: '17 5 * * 1'  # stagger across repositories
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ship-release
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+      # Add id-token: write only when the repository's native auth needs OIDC.
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.12.17'
+      # Set up pnpm/Node if used; prepare the existing native registry login here.
+      - uses: habemus-papadum/pdum_ship/.github/actions/refresh@<reviewed-revision>
+        with:
+          ci_workflow: ci.yml
+```
+
+The selected CI workflow must support manual dispatch. Configure repository/owner
+policy to permit Actions-created PRs; if prohibited, the failed candidate remains
+available in its branch and artifact and the job stays red. Do not weaken that
+signal or use a human token for Git pushes as an implicit deployment trigger.
+
+The action commits passing locks and generated Ship skill copies; first-party
+manifest floors do not move. It preserves failed resolved candidates in a draft
+PR and restores ordinary local refresh inputs. Baseline/resolution failures without
+a candidate are diagnostic failures only. Existing candidate PRs/branches freeze
+new updates until reviewed, so an agent's repairs are never overwritten. The
+[README](../README.md#weekly-dependency-integration) owns the full behavior.

@@ -7,11 +7,12 @@ with ``all=True``), re-installs with the lockfile, runs the tests and reports wh
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import subprocess
 import tomllib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
@@ -133,6 +134,8 @@ def refresh_tests(config: Config) -> list[str]:
     """Repository tests apply even when the repository publishes nothing."""
     from .release import default_tests
 
+    if config.refresh_test is not None:
+        return list(config.refresh_test)
     commands = list(config.test or [])
     for project in projects(config):
         override = config.package(project.name).test
@@ -146,6 +149,71 @@ def refresh_tests(config: Config) -> list[str]:
             elif project.publishable or not (config.pnpm_dir / "package.json").exists():
                 commands.extend(default_tests(config, project))
     return list(dict.fromkeys(commands))
+
+
+def verify(config: Config, say) -> None:
+    """Run the explicitly selected maintenance checks against installed dependencies."""
+    commands = refresh_tests(config)
+    if not commands:
+        raise RefreshError("no refresh tests found; configure [tool.ship] refresh-test")
+    for command in commands:
+        say(f"  $ {command}")
+        if subprocess.run(command, cwd=config.root, shell=True).returncode != 0:
+            raise RefreshError(f"maintenance checks failed: {command}")
+
+
+class RefreshReport:
+    """Optional diagnostics. Candidate lockfiles are copied before ordinary rollback."""
+
+    def __init__(self, directory: Path | None, repo: Repo, config: Config):
+        self.directory = directory
+        self.root = config.root
+        self.data = {
+            "schema": 1,
+            "source_commit": repo.head() if directory is not None else None,
+            "phase": "resolve",
+            "status": "running",
+            "candidate_valid": False,
+            "lockfiles": [],
+            "moves": [],
+        }
+        self.before = lock_state(config)
+        if directory is not None:
+            if directory.exists() and any(directory.iterdir()):
+                raise RefreshError("refresh report directory must be empty")
+            directory.mkdir(parents=True, exist_ok=True)
+            self.write()
+
+    def write(self, **updates):
+        self.data.update(updates)
+        if self.directory is not None:
+            (self.directory / "refresh.json").write_text(json.dumps(self.data, indent=2) + "\n")
+
+    def candidate(self, config: Config, moved: list[Moved]):
+        self.write(candidate_valid=True, moves=[asdict(m) for m in moved])
+        if self.directory is None:
+            return
+        patch = []
+        paths = []
+        for path, original in self.before.items():
+            current = path.read_bytes()
+            if current == original:
+                continue
+            relative = path.relative_to(self.root)
+            output = self.directory / "candidate" / relative
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(current)
+            paths.append(relative.as_posix())
+            patch.extend(
+                difflib.unified_diff(
+                    original.decode().splitlines(keepends=True),
+                    current.decode().splitlines(keepends=True),
+                    fromfile="a/" + relative.as_posix(),
+                    tofile="b/" + relative.as_posix(),
+                )
+            )
+        (self.directory / "candidate.patch").write_text("".join(patch))
+        self.write(lockfiles=paths)
 
 
 def _moved(before: dict[tuple[str, str], frozenset[str]], after: dict[tuple[str, str], frozenset[str]]) -> list[Moved]:
@@ -176,6 +244,7 @@ def refresh(
     dry_run: bool,
     allow_downgrades: bool,
     say,
+    report_dir: Path | None = None,
 ) -> list[Moved]:
     """Upgrade our packages (or everything), reinstall, test, and report what moved.
 
@@ -194,6 +263,8 @@ def refresh(
     manifests.add(config.pnpm_dir / "pnpm-workspace.yaml")
     snapshots = {p: p.read_bytes() if p.exists() else None for p in [*_lockfiles(config), *manifests]}
     lock_before = lock_state(config)
+    report = RefreshReport(report_dir if not dry_run else None, repo, config)
+    report.write(tests_requested=run_tests)
 
     def restore(message: str) -> RefreshError:
         for path, content in snapshots.items():
@@ -201,6 +272,7 @@ def refresh(
                 path.unlink(missing_ok=True)
             else:
                 path.write_bytes(content)
+        report.write(status="failed", error=message)
         return RefreshError(message + "\nThe lockfiles and dependency declarations are back as they were.")
 
     # Each command runs in the directory of the lockfile it moves.
@@ -227,6 +299,7 @@ def refresh(
 
     if not commands:
         say("nothing to refresh: no lockfile holds one of our packages")
+        report.write(status="unchanged", phase="complete")
         return []
     for args, cwd in commands:
         say(f"  $ {' '.join(args)}" + ("  (dry run)" if dry_run else ""))
@@ -242,7 +315,14 @@ def refresh(
         raise restore("refresh changed a dependency declaration; only lockfiles may change")
     moved = _moved(before, lock_versions(config))
     if lock_state(config) == lock_before:
+        report.write(status="unchanged", phase="complete")
         return []
+    candidate_state = lock_state(config)
+    try:
+        report.candidate(config, moved)
+    except OSError as exc:
+        raise restore("could not preserve candidate diagnostics") from exc
+    report.write(phase="policy")
 
     if not everything:
         suspicious = [m for m in moved if not config.is_ours(m.name) and m.kind in ("downgraded", "removed")]
@@ -257,6 +337,7 @@ def refresh(
                 "an upper bound), or investigate the resolution."
             )
 
+    report.write(phase="install")
     for args, cwd, lock in (
         (["uv", "sync", "--locked"], root, root / "uv.lock"),
         (["pnpm", "install", "--frozen-lockfile"], config.pnpm_dir, _pnpm_lock(config)),
@@ -269,16 +350,16 @@ def refresh(
             raise restore(f"install failed after the lockfile moved:\n{_table(moved)}\n  $ {' '.join(args)}")
 
     if run_tests:
-        commands_to_test = refresh_tests(config)
-        if not commands_to_test and config.test is None:
-            raise restore("no refresh tests found; configure [tool.ship] test or explicitly use --no-test")
-        for command in commands_to_test:
-            say(f"  $ {command}")
-            proc = subprocess.run(command, cwd=root, shell=True)
-            if proc.returncode != 0:
-                raise restore(f"tests failed after the lockfile moved:\n{_table(moved)}\n  $ {command}")
+        report.write(phase="tests")
+        try:
+            verify(config, say)
+        except RefreshError as exc:
+            raise restore(f"tests failed after the lockfile moved:\n{_table(moved)}\n{exc}") from exc
     if any((p.read_bytes() if p.exists() else None) != snapshots[p] for p in manifests):
         raise restore("install or tests changed a dependency declaration")
+    if lock_state(config) != candidate_state:
+        raise restore("install or tests changed the resolved candidate lockfiles")
+    report.write(status="passed", phase="complete")
     return moved
 
 

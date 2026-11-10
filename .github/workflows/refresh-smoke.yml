@@ -1,0 +1,25 @@
+name: refresh-smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ship-refresh-smoke
+  cancel-in-progress: false
+jobs:
+  draft-pr:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Verify controlled failed-candidate draft PR and clean up disposable refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 .github/actions/refresh/smoke.py

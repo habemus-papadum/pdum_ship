@@ -130,8 +130,8 @@ All nine manifests and tags agree at `0.8.1+dev` / `0.8.1`, and
   uv to upgrade only `habemus-papadum-ship` and came back with jupyterlab
   downgraded 4.6.2 → 3.6.8 and sixteen other packages churned; it did not
   reproduce and is unexplained. Since 0.5.0 a refresh that downgrades or
-  removes a third-party package fails and restores the lockfiles. The first
-  scheduled integration run in a consumer repository is still to be set up.
+  removes a third-party package fails and restores the lockfiles. Ship 0.12.0 adds the shared weekly action, candidate retention and independently
+  selected maintenance checks; consumer rollout evidence is recorded by the operator.
 - A release is visible to `uv lock --upgrade-package` only once PyPI's JSON
   simple index has it, a few minutes after the HTML page; a refresh run right
   after a release can miss it. Harmless for a scheduled run.
