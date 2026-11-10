@@ -200,7 +200,7 @@ def test_refresh_refuses_third_party_downgrades(single_repo, monkeypatch):
         return Done()
 
     monkeypatch.setattr(deps.subprocess, "run", fake_run)
-    with pytest.raises(deps.RefreshError, match="downgraded or removed third-party"):
+    with pytest.raises(deps.RefreshError, match="downgraded third-party"):
         deps.refresh(
             repo,
             cfg,

@@ -182,7 +182,7 @@ def deps_refresh(
         bool,
         typer.Option(
             "--allow-downgrades",
-            help="Accept third-party packages being downgraded or removed while refreshing ours",
+            help="Accept third-party packages being downgraded while refreshing ours",
         ),
     ] = False,
 ) -> None:

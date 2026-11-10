@@ -16,7 +16,7 @@ from refresh import Runner
 
 
 class SmokeRunner(Runner):
-    def require(self, args: list[str]) -> None:
+    def capture(self, args: list[str]) -> str:
         if args[:3] == ["gh", "pr", "create"]:
             args = list(args)
             args[args.index("--title") + 1] = "[Ship smoke test] controlled failed-candidate PR"
@@ -25,7 +25,7 @@ class SmokeRunner(Runner):
                 "Controlled verification of Ship automation. No real dependency regression is claimed. "
                 "This draft and its disposable refs will be cleaned up by the test.\n\n" + body.read_text()
             )
-        super().require(args)
+        return super().capture(args)
 
 
 def main() -> None:

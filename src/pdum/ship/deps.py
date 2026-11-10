@@ -248,10 +248,10 @@ def refresh(
 ) -> list[Moved]:
     """Upgrade our packages (or everything), reinstall, test, and report what moved.
 
-    In the house-only mode a third-party package that is downgraded or removed is treated
-    as an error: upgrading one of our packages can add or raise a third-party requirement,
-    but it cannot legitimately lower one, so such a move means the resolver did something
-    the operator should look at. ``allow_downgrades`` accepts it. Any failure restores the
+    In the house-only mode a third-party downgrade requires explicit review.
+    Removing obsolete transitives is normal when an upgraded package drops a
+    dependency; declaration preservation, locked installation and verification
+    still apply to that candidate. ``allow_downgrades`` accepts it. Any failure restores the
     lockfiles to their committed state.
     """
     root = config.root
@@ -325,11 +325,11 @@ def refresh(
     report.write(phase="policy")
 
     if not everything:
-        suspicious = [m for m in moved if not config.is_ours(m.name) and m.kind in ("downgraded", "removed")]
+        suspicious = [m for m in moved if not config.is_ours(m.name) and m.kind == "downgraded"]
         if suspicious and not allow_downgrades:
             raise restore(
-                "refreshing our packages also downgraded or removed third-party packages, which an "
-                "upgrade of ours cannot require:\n"
+                "refreshing our packages also downgraded third-party packages; review these "
+                "version reductions explicitly:\n"
                 + _table(suspicious)
                 + "\nAll moves:\n"
                 + _table(moved)

@@ -168,3 +168,19 @@ never changed main. The [manual weekly self-run](https://github.com/habemus-papa
 passed baseline verification and reported unchanged locks without a commit.
 Consumer rollouts exercise real first-party upgrades under their own authentication
 and maintained-test policies. No publishing or deployment is part of refresh.
+
+
+## Obsolete dependency pruning and PR reporting
+
+Review of the first FAI design/Analog candidates found a false positive in the
+removal guard: aiui-source-processor 0.24.1 no longer depends on aiui-util, so its
+Puppeteer/proxy tree legitimately disappears. The candidate installs and fai-design
+maintenance checks pass. The correction permits resolver-pruned dependencies while
+still preserving declarations, validating locked installation/tests and rejecting
+third-party version downgrades unless explicitly accepted.
+
+The refresh action now reports update rejection separately from PR delivery,
+including the created PR URL and the original rejection phase/reason. A failed
+update remains a failed workflow even when its draft is created successfully.
+Historical permission failures and later successful recovery runs remain distinct;
+PR CI can also require GitHub approval before it starts.

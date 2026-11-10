@@ -85,6 +85,14 @@ class Runner:
         if code:
             raise IntegrationError(f"{self.phase}: {args[0]} exited {code}; see workflow log")
 
+    def capture(self, args: list[str]) -> str:
+        """Capture an operation's receipt, leaving native errors in masked CI logs."""
+        print("$ " + " ".join(args), flush=True)
+        proc = subprocess.run(args, cwd=self.root, text=True, stdout=subprocess.PIPE)
+        if proc.returncode:
+            raise IntegrationError(f"{self.phase}: {args[0]} exited {proc.returncode}; see workflow log")
+        return proc.stdout.strip()
+
     def save(self, **values) -> None:
         if self.report_dir.resolve() != self.report_dir:
             raise IntegrationError("diagnostics path became a symlink")
@@ -205,9 +213,10 @@ class Runner:
         rows = [f"| {m['ecosystem']} / {m['name']} | {m['before'] or '—'} | {m['after'] or '—'} |" for m in moves]
         failed_phase = data["phase"] if data.get("status") == "failed" else self.phase
         body = (
-            "Ship's selected maintenance checks rejected this candidate. This draft is for investigation.\n\n"
+            f"The dependency update was rejected during `{failed_phase}`. This draft preserves it for review.\n\n"
             f"Base commit: `{self.base}`\n\nRun and logs: {self.run_url}\n\n"
-            f"Failed phase: `{failed_phase}`. The run remains failed.\n\n"
+            "The workflow's failed status refers to the rejected update, not to creation of this draft. "
+            "If rejection happened before the tests phase, candidate tests have not passed yet.\n\n"
             "Reproduce from this branch with locked installation, `uv run --locked ship skills sync`, "
             "`uv run --locked ship deps check`, and `uv run --locked ship deps verify`. "
             "The workflow artifact retains the candidate lockfiles and refresh report.\n\n"
@@ -215,23 +224,59 @@ class Runner:
         )
         body_file = self.report_dir / "pr-body.md"
         body_file.write_text(body)
-        self.require(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--draft",
-                "--base",
-                self.branch,
-                "--head",
-                self.branch_name,
-                "--title",
-                "deps: investigate first-party dependency update",
-                "--body-file",
-                str(body_file),
-            ]
-        )
-        self.save(candidate_branch=self.branch_name)
+        self.save(pr_status="creating")
+        try:
+            url = self.capture(
+                [
+                    "gh",
+                    "pr",
+                    "create",
+                    "--draft",
+                    "--base",
+                    self.branch,
+                    "--head",
+                    self.branch_name,
+                    "--title",
+                    "deps: investigate first-party dependency update",
+                    "--body-file",
+                    str(body_file),
+                ]
+            )
+        except IntegrationError as exc:
+            self.save(pr_status="creation_failed", pr_error=str(exc))
+            raise
+        self.save(candidate_branch=self.branch_name, pr_status="created", candidate_pr=url)
+
+    def record_rejection(self, reason: str) -> None:
+        phase = self.phase
+        path = self.report_dir / "refresh" / "refresh.json"
+        if path.exists():
+            if path.resolve() != path:
+                raise IntegrationError("candidate report is a symlink")
+            data = json.loads(path.read_text())
+            if data.get("status") == "failed":
+                phase = data.get("phase", phase)
+                reason = data.get("error", reason)
+        self.save(update_status="rejected", rejection_phase=phase, rejection_reason=reason)
+
+    def summary(self) -> str:
+        lines = ["## Ship dependency refresh", ""]
+        if self.result.get("update_status") == "rejected":
+            lines.append(f"Dependency update: **rejected** during `{self.result['rejection_phase']}`.")
+        elif self.result.get("existing_pr"):
+            lines.append("Dependency update: **waiting for review**; no new update attempted.")
+        else:
+            lines.append(f"Dependency update: **{self.result['status']}**.")
+        delivery = self.result.get("pr_status")
+        if delivery == "created":
+            lines.append(f"Draft PR creation: **succeeded** — {self.result['candidate_pr']}")
+        elif delivery == "creation_failed":
+            lines.append("Draft PR creation: **failed**; the candidate branch and evidence are retained.")
+        elif self.result.get("existing_pr"):
+            lines.append(f"Existing draft preserved: {self.result['existing_pr']}")
+        if self.result.get("update_status") == "rejected":
+            lines.append("The workflow remains failed because the update was not accepted; main was not updated.")
+        return "\n".join(lines) + "\n\n```json\n" + json.dumps(self.result, indent=2) + "\n```\n"
 
     def validate_ci(self) -> None:
         name = Path(self.ci_workflow)
@@ -295,6 +340,7 @@ class Runner:
             ]
         )
         if code:
+            self.record_rejection("dependency refresh failed")
             self.candidate_pr()
             raise IntegrationError("dependency refresh failed; candidate evidence retained")
         if all(
@@ -325,7 +371,8 @@ class Runner:
             self.phase = "candidate_policy"
             self.require(["uv", "run", "--locked", "ship", "deps", "check"])
             paths = self.validate_diff()
-        except IntegrationError:
+        except IntegrationError as exc:
+            self.record_rejection(str(exc))
             self.candidate_pr()
             raise
         if not paths:
@@ -370,9 +417,7 @@ def main() -> int:
             summary = os.environ.get("GITHUB_STEP_SUMMARY")
             if summary:
                 with Path(summary).open("a") as stream:
-                    stream.write(
-                        "## Ship dependency refresh\n\n```json\n" + json.dumps(runner.result, indent=2) + "\n```\n"
-                    )
+                    stream.write(runner.summary())
             try:
                 path = runner.artifact_path()
                 if path and os.environ.get("GITHUB_OUTPUT"):

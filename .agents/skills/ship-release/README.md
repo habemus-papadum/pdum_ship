@@ -234,12 +234,13 @@ and a table of what moved. With `--all`, third-party packages move too, within
 their declared ranges and behind the release-age gates. The lockfile is left
 uncommitted. `--dry-run` prints the commands; `--no-test` skips the tests.
 
-Without `--all`, a third-party package that is **downgraded or removed** is an
-error: upgrading one of our packages can add or raise a third-party
-requirement, but cannot lower one, so such a move means the resolver did
-something to look at. ship restores the lockfiles and prints the moves;
-`--allow-downgrades` accepts them (for example when one of our packages added
-an upper bound). Any failure — the lock command, the install, the tests —
+Without `--all`, a third-party package that is **downgraded** requires review:
+Ship restores the lockfiles and reports the moves. `--allow-downgrades` explicitly
+accepts such version reductions. Removing obsolete transitive packages is allowed:
+an upgraded first-party package may stop depending on a library or browser toolchain.
+Dependency declarations must stay unchanged, and locked installation and configured
+checks must still pass. Removals remain visible in the version-change report.
+Any failure — the lock command, the install, the tests —
 restores the lockfiles and dependency declarations and reports the moves that
 were attempted. Test selection includes private projects, and an explicit
 repository `test` command runs even when nothing is publishable. A changed
@@ -396,7 +397,10 @@ The action performs these steps:
 The shared action requires `contents: write`, `pull-requests: write` and
 `actions: write`. The repository/organization must allow Actions to create PRs.
 A denied PR creation leaves the candidate branch and artifacts intact and fails
-visibly. Existing candidate branches are never overwritten; new branch creation
+visibly. The report and job summary distinguish dependency rejection from
+PR delivery: `update_status`, `rejection_phase`, `pr_status` and `candidate_pr`
+show whether the update failed and whether its draft was created successfully.
+Creating a draft does not turn rejected validation into a passing update. Existing candidate branches are never overwritten; new branch creation
 uses an absent-ref lease. A human or agent closes/merges the PR and removes its
 branch when finished. Baseline/report failures likewise remain failed.
 

@@ -171,3 +171,39 @@ def test_tests_must_not_change_resolved_lockfile(single_repo, tmp_path):
             )
     assert lock.read_bytes() == original
     assert (tmp_path / "report/candidate/uv.lock").read_bytes() == original + b"\n# candidate\n"
+
+
+@pytest.mark.parametrize("checks_pass", [True, False])
+def test_obsolete_transitives_can_be_pruned_but_candidate_checks_still_apply(single_repo, monkeypatch, checks_pass):
+    config = replace(config_mod.load(single_repo.root), ours=["demo-*"], refresh_test=["verify-candidate"])
+    lock = single_repo.root / "uv.lock"
+    original = lock.read_bytes()
+    candidate = original + b"\n# upstream no longer needs its browser toolchain\n"
+    versions = iter(
+        [
+            {("python", "demo-lib"): frozenset(["1.0.0"]), ("python", "obsolete-browser"): frozenset(["2.0.0"])},
+            {("python", "demo-lib"): frozenset(["1.1.0"])},
+        ]
+    )
+    monkeypatch.setattr(deps, "lock_versions", lambda _: next(versions))
+    monkeypatch.setattr(deps, "uv_lock_registry_packages", lambda _: {"demo-lib", "obsolete-browser"})
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if isinstance(args, list) and args[:2] == ["uv", "lock"]:
+            lock.write_bytes(candidate)
+        return subprocess.CompletedProcess(args, int(args == "verify-candidate" and not checks_pass))
+
+    with patch.object(deps.subprocess, "run", side_effect=run), patch.object(Repo, "head", return_value="f" * 40):
+        kwargs = dict(everything=False, run_tests=True, dry_run=False, allow_downgrades=False, say=lambda _: None)
+        if checks_pass:
+            moved = deps.refresh(Repo(config.root), config, packages.discover(config), **kwargs)
+            assert [(m.name, m.kind) for m in moved] == [("demo-lib", "upgraded"), ("obsolete-browser", "removed")]
+            assert lock.read_bytes() == candidate
+        else:
+            with pytest.raises(deps.RefreshError, match="tests failed"):
+                deps.refresh(Repo(config.root), config, packages.discover(config), **kwargs)
+            assert lock.read_bytes() == original
+    assert ["uv", "sync", "--locked"] in calls
+    assert "verify-candidate" in calls

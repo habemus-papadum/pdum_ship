@@ -38,6 +38,15 @@ class Harness(action.Runner):
             return json.dumps([self.pr] if self.pr else [])
         return super().output(args)
 
+    def capture(self, args):
+        self.calls.append(args)
+        if args[:3] == ["gh", "pr", "create"]:
+            if self.scenario == "pr-denied":
+                raise action.IntegrationError("synthetic PR permission denial")
+            self.pr = {"number": 123, "url": "https://example.invalid/pull/123", "body": "candidate"}
+            return self.pr["url"]
+        return super().capture(args)
+
     def run(self, args):
         self.calls.append(args)
         if args[0] == "git":
@@ -129,6 +138,12 @@ def test_failed_candidate_creates_draft_pr_without_main_update(weekly_repo, scen
     assert "--draft" in create
     body = (h.report_dir / "pr-body.md").read_text()
     assert h.base in body and "ship deps verify" in body
+    assert h.result["update_status"] == "rejected"
+    assert h.result["pr_status"] == "created"
+    assert h.result["candidate_pr"] == "https://example.invalid/pull/123"
+    assert "Draft PR creation: **succeeded**" in h.summary()
+    assert "workflow remains failed" in h.summary()
+    assert "not to creation of this draft" in body
 
 
 @pytest.mark.parametrize("scenario", ["baseline", "resolve"])
@@ -152,6 +167,10 @@ def test_pr_permission_failure_retains_branch_and_diagnostics(weekly_repo):
     assert remote_file(weekly_repo, branch=h.branch_name) == h.new
     assert h.result["candidate_branch"] == h.branch_name
     assert h.result["candidate_commit"]
+    assert h.result["update_status"] == "rejected"
+    assert h.result["rejection_phase"] == "candidate_tests"
+    assert h.result["pr_status"] == "creation_failed"
+    assert "Draft PR creation: **failed**" in h.summary()
 
 
 def test_existing_pr_is_preserved_and_freezes_refresh(weekly_repo):
